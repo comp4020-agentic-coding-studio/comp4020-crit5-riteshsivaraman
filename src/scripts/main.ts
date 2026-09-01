@@ -15,6 +15,19 @@ import {
 } from "../game/render";
 import { createBody, stepBody, JUMP_SPEED, type Body, type PhysicsLevel } from "../game/physics";
 import { createInputController } from "../game/input";
+// Issue #4: size system. Pure module — see notes/agents/log.md [#4] for why
+// the safe-growth predicate and the transition timer live there and not
+// inline here. main.ts's only job is to notice when the player is standing
+// on a 'G'/'C' tile and forward that to requestSizeChange.
+import {
+  advanceSizeTransition,
+  HITBOX,
+  initialSizeState,
+  PLAYER_COLOR,
+  requestSizeChange,
+  transitionScale,
+  type PlayerSizeState,
+} from "../game/player";
 // Issue #11's browser half of playSfx, imported directly rather than only
 // relying on index.astro's separate <script> tag — see this file's log
 // entry [#10] for why that's safe (ESM module identity is per URL, so the
@@ -138,11 +151,16 @@ function buildDemoRows(): string[] {
 
 const demoLevel = parseLevel(buildDemoRows());
 const demoDestroyed = new Set<string>();
+// Issue #4: the small hitbox is the real spawn size (8x10), replacing #14's
+// throwaway 8x16 placeholder per that issue's own log entry ("do not treat
+// it as load-bearing" — this is the Builder that gets to decide).
+let sizeState: PlayerSizeState = initialSizeState("small");
 const player: PlayerRect = {
   x: demoLevel.spawn.x * TILE,
-  y: demoLevel.spawn.y * TILE - (16 - TILE),
-  width: 8,
-  height: 16,
+  y: demoLevel.spawn.y * TILE - (HITBOX.small.height - TILE),
+  width: HITBOX.small.width,
+  height: HITBOX.small.height,
+  color: PLAYER_COLOR.small,
 };
 
 // world.ts (#6) doesn't exist yet, so there is no real reducer to step —
@@ -198,8 +216,40 @@ function step(fixedDeltaMs: number): void {
     playSfx("land");
   }
 
-  player.x = playerBody.x;
-  player.y = playerBody.y;
+  // Issue #4: touching a growth pad or coolant tile requests a size
+  // change. The tile sampled is the one at the body's feet, centre
+  // column — same "tiny inward epsilon" convention physics.ts itself uses
+  // so a body sitting exactly on a tile boundary samples the tile it's
+  // actually standing in. requestSizeChange is the no-op when already at
+  // the target size or when the safe-growth predicate refuses the move
+  // (e.g. no headroom) — this call site doesn't special-case either.
+  const feetTileX = Math.floor((playerBody.x + playerBody.width / 2) / TILE);
+  const feetTileY = Math.floor((playerBody.y + playerBody.height - 1e-6) / TILE);
+  const feetRow = demoLevel.grid[feetTileY];
+  const feetChar = feetRow ? feetRow[feetTileX] : undefined;
+  const target = feetChar === "G" ? "large" : feetChar === "C" ? "small" : null;
+  if (target) {
+    const change = requestSizeChange(sizeState, target, playerBody.x, playerBody.y, physicsLevel, demoDestroyed);
+    if (change.triggered) {
+      sizeState = change.state;
+      const box = HITBOX[target];
+      playerBody = { ...playerBody, x: change.x, y: change.y, width: box.width, height: box.height };
+      playSfx(target === "large" ? "grow" : "shrink");
+    }
+  }
+  sizeState = advanceSizeTransition(sizeState, fixedDeltaMs);
+
+  // Squash/stretch is drawn-only (plan.md §8): the hitbox above already
+  // swapped instantly, so collision never reasons about an in-between
+  // size. This just scales what's blitted, keeping feet visually planted.
+  const scale = transitionScale(sizeState);
+  const drawWidth = playerBody.width * scale.scaleX;
+  const drawHeight = playerBody.height * scale.scaleY;
+  player.x = playerBody.x + (playerBody.width - drawWidth) / 2;
+  player.y = playerBody.y + playerBody.height - drawHeight;
+  player.width = drawWidth;
+  player.height = drawHeight;
+  player.color = PLAYER_COLOR[sizeState.size];
 }
 
 function render(): void {

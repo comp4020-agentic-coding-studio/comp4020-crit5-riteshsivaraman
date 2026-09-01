@@ -119,6 +119,11 @@ export type PlayerRect = {
   y: number;
   width: number;
   height: number;
+  /** Issue #4: warm/cool colouring by size is the only explanation a
+   * no-tutorial player gets for what grow/coolant did. Optional so every
+   * existing caller (and every other issue's test fixture) keeps working
+   * unchanged — omitted, this falls back to the original neutral colour. */
+  color?: string;
 };
 
 /** Tile kinds that never need a blit — pure floor, nothing to draw. Fragile
@@ -127,7 +132,8 @@ const SKIP_KIND: ReadonlySet<TileKind> = new Set<TileKind>(["empty"]);
 
 /** Not one of the reserved mechanic colours (tileset.ts's `g`/`y`/`v`) and
  * not any terrain hue, so the player reads as a distinct foreground entity
- * against the tileset per plan.md §4/§9. */
+ * against the tileset per plan.md §4/§9. Default when `player.color` isn't
+ * given (see issue #4's `PlayerRect.color`). */
 const PLAYER_COLOR = "#f4f4f0";
 
 /**
@@ -162,6 +168,6 @@ export function renderLevel(
     }
   }
 
-  ctx.fillStyle = PLAYER_COLOR;
+  ctx.fillStyle = player.color ?? PLAYER_COLOR;
   ctx.fillRect(player.x, player.y, player.width, player.height);
 }
