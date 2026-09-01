@@ -239,7 +239,24 @@ export type SolveResult = {
  * with (never reachable) is not this sensor's concern; plan.md's fatal
  * predicates are authored against states the *player can actually be in*.
  */
-export function solveRoom(level: Level): SolveResult {
+export type SolveOptions = {
+  /**
+   * Issue #9/#15's "unsolvable without rewind" assertion: when `false`,
+   * every rewind-shaped edge is suppressed — the explicit "rewind to
+   * anchor" edge in `edgesOf`, and the automatic re-trigger `resolveAuto`
+   * fires on re-entering an already-armed machine's tile. Arming itself
+   * (`arm()`) still happens; only the teleport is disabled, which is the
+   * minimal cut that isolates "does this room's solvability depend on the
+   * rewind action" without touching the normal (`allowRewind: true`,
+   * the default) solve path at all — every existing call site and test
+   * that omits this option gets byte-for-byte the same behaviour as
+   * before this option existed.
+   */
+  allowRewind?: boolean;
+};
+
+export function solveRoom(level: Level, options: SolveOptions = {}): SolveResult {
+  const allowRewind = options.allowRewind ?? true;
   const physLevel = toPhysicsLevel(level);
   const fragile = buildFragileIndex(level);
 
@@ -373,7 +390,7 @@ export function solveRoom(level: Level): SolveResult {
       const hitRewind = entityFootprintHit(tx, ty, size, rewindTiles);
       if (hitRewind) {
         const alreadyArmedHere = anchor !== null && anchor.tileX === hitRewind.x && anchor.tileY === hitRewind.y;
-        if (alreadyArmedHere && anchor && !rewoundThisSettle) {
+        if (allowRewind && alreadyArmedHere && anchor && !rewoundThisSettle) {
           const anchorBox = footprintBox(anchor.tileX, anchor.tileY, anchor.size);
           const currentBox = footprintBox(tx, ty, size);
           const result = rewind({
@@ -488,7 +505,7 @@ export function solveRoom(level: Level): SolveResult {
     // `push`, exactly like every other edge, which is what models "the
     // anchor cell is clear" as distinct from "the anchor cell has a floor".
     // ---
-    if (s.anchor) {
+    if (allowRewind && s.anchor) {
       const currentBox = footprintBox(s.tx, s.ty, s.size);
       const anchorBox = footprintBox(s.anchor.tileX, s.anchor.tileY, s.anchor.size);
       const anchor: Anchor = { x: anchorBox.x, y: anchorBox.y, size: s.anchor.size };
