@@ -49,8 +49,13 @@ for costing more in context-reload than it caught. That reasoning holds for a
 per-issue reviewer; it does not hold for a once-per-phase gate that reads
 `git status` and the issue bodies. The distinction --- coordination that
 reloads context versus coordination that only inspects state --- is the thing
-worth carrying forward, and it belongs in `CLAUDE.md` in the next batched
-harness change rather than as an ad-hoc edit mid-session.
+worth carrying forward, so it went into `CLAUDE.md` and into a sensor in the
+next batched harness change ([`ed0a23d`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/ed0a23d)) rather than as
+an ad-hoc edit mid-session. `pnpm check:dispatch` now asserts the four things I
+checked by hand, and the read side got the fix the write side didn't need: log
+entries carry `[#n]` tags and the gate prints the matching ones for pasting
+into the Builder's prompt, because a log that is written but never consulted
+fails silently and no sensor can catch that.
 
 **Citation.**
 [`7e9927d...c74e54f`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/compare/7e9927d...c74e54f) --- the stack migration
