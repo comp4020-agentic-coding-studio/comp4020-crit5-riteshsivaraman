@@ -437,3 +437,49 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   check from #3's log entry (now unblocked, but nobody has played it).
   Ritesh's next real-browser pass should cover all of these.
   `pnpm check` green, 125 tests (up from 111 — 14 new in `spec/input.test.ts`).
+
+- **Builder-Tester** [#10 #12] — fixed a real bug Ritesh caught by actually
+  playing it: on a wide (landscape) viewport the touch pads rendered on top
+  of the canvas instead of staying hidden. Root cause was a specificity
+  trap, not a logic bug — `main.ts`'s `controls.hidden = true` in the
+  landscape branch of `applyLayout` set the attribute correctly, but
+  `#game-controls { display: flex; ... }` in `styles.css` (an id selector)
+  outranks the UA stylesheet's `[hidden] { display: none }`, so the
+  attribute had no visible effect; `position: absolute` is only applied in
+  the portrait branch, so the pads then sat in static flow directly over
+  the canvas. This is the third time this crit a mechanism looked green
+  (typecheck, build, and all 125 tests passed) while silently not working —
+  after a sensor that asserted on zero files, and `overflow-x: hidden`
+  making an acceptance criterion unfalsifiable — so the fix is a sensor,
+  not just an edit.
+  Added `spec/hidden-display.test.ts`: for every id a script toggles via
+  `el.hidden = ...` (currently `#game-controls` in `main.ts`,
+  `#rewind-control` in `input.ts` — hardcoded list, refresh by grepping
+  `\.hidden` in `src/`, since these ids reach `hidden` through DOM element
+  references rather than string literals a script could follow reliably),
+  it parses `styles.css` and fails if that id has a bare rule setting
+  `display` with no matching `#id[hidden] { display: none }` guard.
+  **Confirmed red first, for the right id**: before the fix, this failed on
+  `#game-controls` ("sets 'display' outside a [hidden]-guarded rule...")
+  and passed on `#rewind-control` (already guarded from this issue's
+  earlier commit) — both halves matter, since a sensor that reds on
+  everything is as useless as one that reds on nothing. Fix: added
+  `#game-controls[hidden] { display: none; }`, same pattern as
+  `#rewind-control`'s existing guard. `display: none` (not
+  `visibility: hidden`) also takes the pads fully out of layout in
+  landscape, not just out of view, per the orchestrator's note. Re-ran
+  `spec/layout.test.ts` alongside it — still green, so the portrait
+  positioning path (`applyLayout`'s `controlsRect` branch, unaffected by
+  this rule since it only fires when `[hidden]` is present) is untouched.
+  Checked the rest of the page for the same trap: `grep -rn hidden src/`
+  turns up exactly these two toggled ids and nothing else with a competing
+  `display` rule.
+  **Tagged for #12**: this stylesheet and `index.astro`'s markup are what a
+  no-instructions sensor will be reading; the guard rule's comment
+  documents *why* it exists in terms of the bug, not game mechanics, so it
+  shouldn't trip anything issue #12 checks for.
+  Still `refs #10`, not closing it — the live-browser criteria (touch
+  emulation at 390x844, no 300ms delayed click, console clean) remain
+  unverified; no browser was connected this session either.
+  `pnpm check` green, 127 tests (up from 125 — 2 new in
+  `spec/hidden-display.test.ts`).

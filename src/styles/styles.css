@@ -59,6 +59,17 @@ main h1 {
   background: #1c1c22;
 }
 
+/* Without this, `main.ts`'s `controls.hidden = true` (landscape branch)
+   sets the attribute but has no visible effect: the UA stylesheet's
+   `[hidden] { display: none }` is outranked by the bare `#game-controls`
+   rule above, so the pads stayed in static flow and rendered on top of the
+   canvas — see spec/hidden-display.test.ts, which fails without this rule.
+   `display: none` (not just `visibility: hidden`) also takes the element
+   out of layout entirely in landscape, not merely out of view. */
+#game-controls[hidden] {
+  display: none;
+}
+
 /* Touch pads (src/game/input.ts). touch-action/user-select are also set
    inline by input.ts itself, so the no-scroll/no-zoom/no-select contract
    holds even if this stylesheet fails to load --- this class only adds the
