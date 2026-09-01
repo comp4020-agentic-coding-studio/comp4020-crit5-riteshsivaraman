@@ -2,6 +2,14 @@
 // randomness, no clock reads. Rooms (issue 9, src/game/rooms/*.ts) call
 // parseLevel with their ASCII art and their own fatal predicates.
 import { isSolidChar, isTileChar, tileKindForChar, type TileChar, type TileKind } from "./tiles";
+// Issue #7: rules.ts now exists and defines the concrete shape a fatal
+// predicate actually takes (`RoomState` — see that file's header for why
+// it's shaped like the solver's state, not like `World`/`Level`).
+// Type-only import: rules.ts imports `Size`/`Anchor` (type-only) from
+// player.ts/rewind.ts, neither of which imports level.ts at the type
+// level in a way that would make this a real (value) cycle — see
+// notes/agents/log.md [#7].
+import type { RoomState } from "./rules";
 
 export type EntityType = "growth" | "coolant" | "rewind";
 
@@ -18,14 +26,15 @@ const ENTITY_TYPE_FOR_CHAR: Partial<Record<TileChar, EntityType>> = {
 };
 
 /**
- * A room's own fatal predicate. Typed over `unknown` rather than `World`
- * because world.ts (issue 6) doesn't exist yet — level.ts only needs to
- * carry these opaquely from a room definition through to rules.ts, never to
- * call them itself. Whoever builds world.ts can narrow this to
- * `(world: World) => boolean` once that type exists; the shape here is
- * already `(world) => boolean`, so callers won't need to change.
+ * A room's own fatal predicate — narrowed (issue #7) from the original
+ * `(world: unknown) => boolean` placeholder to the real shape rules.ts's
+ * `isRoomDead` evaluates against: `RoomState`, not `World`/`Level`. See
+ * rules.ts's header for why the state is tile-position + size + destroyed
+ * + anchor, rather than either of those richer types. level.ts still only
+ * carries these opaquely from a room definition through to rules.ts —
+ * this file never calls one itself.
  */
-export type FatalPredicate = (world: unknown) => boolean;
+export type FatalPredicate = (state: RoomState) => boolean;
 
 export type Level = {
   width: number;

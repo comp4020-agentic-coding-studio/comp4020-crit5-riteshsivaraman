@@ -758,3 +758,94 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   verified at the unit-test level, not by a human/browser playthrough.
   `pnpm check` green, 188 tests (up from 178 — 10 new: 2 in
   `spec/input.test.ts`, 8 in `spec/rules.test.ts`).
+- **Builder-Tester** [#7 #8 #9 #12 #15] — loss/win: fatal predicates, end
+  screens, per-room restart.
+  New `src/game/rules.ts` (plan.md §5's rules.ts: `isRoomDead(world),
+  hasWon(world)`). Deliberately did NOT type the predicate's argument as
+  `World`/`Level` — issue #8's brief (this issue's own instructions) is
+  "design predicates to be callable from a test-only solver: pure,
+  exported, taking explicit state rather than reading module-level
+  globals." Introduced `RoomState = { playerTileX, playerTileY, size,
+  destroyed, anchor }`, shaped exactly like plan.md §7's solver BFS state
+  `(tileX, tileY, size, destroyedMask, anchor)`, so issue #8 can drive
+  `isRoomDead`/a room's `FatalPredicate[]` directly off states it
+  synthesizes itself, no `World`/`Level` object required. **Issue #8
+  should import**: `isRoomDead`, `hasWon`, `nextStatus`, and the types
+  `RoomState`/`FatalPredicate`/`Status`, all from `src/game/rules.ts`.
+  `isRoomDead(state: RoomState, fatal: readonly FatalPredicate[]):
+  boolean` is `fatal.some(p => p(state))` — cheap, exact, no search
+  (plan.md §6). `hasWon(state, exit)` is the trivial feet-tile-matches-exit
+  check; `nextStatus(current, state, fatal, exit)` is sticky once
+  lost/won.
+  Narrowed `level.ts`'s `FatalPredicate` from the issue-6-era
+  `(world: unknown) => boolean` placeholder to `(state: RoomState) =>
+  boolean` (type-only import from rules.ts — no runtime cycle: the only
+  value-level edge in the level.ts/rules.ts/player.ts triangle is
+  player.ts's existing import of level.ts; everything pointing the other
+  way is `import type`).
+  Restart: wired world.ts's previously-uncalled `restart()` into a new
+  `restartRoom()` in `main.ts`, and — per this issue's brief, flagging the
+  Reviewer's confirmed-at-module-level `restart()` vs a live anchor
+  finding as the reason — reset `anchor`/`armed`, `wasOnRewindTile`,
+  `sizeState`, `playerBody`, and `inputController.setMachineArmed(false)`
+  all in that same function, so nothing that reads any of them mid-restart
+  observes a torn state. Extracted the spawn-placement arithmetic that was
+  inline in issue #14's original boot wiring into a new pure
+  `spawnPosition(spawn, size)` in `player.ts`, so boot and restart place
+  the player from one tested function, not two copies that could drift.
+  Did not touch `rewind()`'s `level`/`occupancyDestroyed` re-check
+  call site — main.ts's `triggerRewind()` already supplies both (prior
+  session's finding #4 fix), so the belt-and-braces occupancy re-check
+  restart's existence motivates is already live.
+  End screens: DOM-based, not canvas-drawn — `render.ts`'s `RenderCtx` has
+  no `fillText`, and widening it for one caller seemed worse than reusing
+  the DOM-control pattern `input.ts` already established for pause/rewind.
+  A single injected `<style>` (keyframe pulse for loss, solid black for
+  win) plus one glyph element (`↻` restart / `►` play again, aria-labelled
+  the same way input.ts's pads are) — no sentence of text anywhere, per
+  plan.md §6 and this issue's Done-when bullet 4 (issue #12's sensor will
+  enforce this going forward; not built here, per this issue's explicit
+  scope cut).
+  `step()` now goes inert (`if (status !== "playing") return`) the instant
+  `isRoomDead`/`hasWon` fire, computed once per step from a fresh
+  `RoomState` assembled from that frame's real `playerBody`/`sizeState`/
+  `demoWorld`/`armed` — never a second copy of any of them. The end-
+  screen glyph's `pointerdown` calls `restartRoom()` directly, never
+  through `step()`, which is what makes "never needs a page reload"
+  true even while the fixed-step loop is inert: a live DOM handler is
+  always waiting.
+  `demoLevel.fatal` is `[]` in main.ts's throwaway demo room (issue #9
+  hasn't authored real rooms yet) — reaching `E` still drives `hasWon`
+  today; no fatal predicate exists to drive `isRoomDead` in the browser
+  until #9 lands one.
+  Red-first, both confirmed by temporarily breaking the implementation and
+  restoring it:
+  - `rules.ts`'s `isRoomDead` stubbed to `return false` unconditionally:
+    exactly the 5 room-3 "wrong break" tests in `spec/rules.test.ts` went
+    red (the room-1/room-2/room-3-intended-path tests, which expect
+    `false`, stayed green throughout — the stub couldn't have told them
+    apart, which is itself the reason those tests exist alongside the
+    wrong-break ones rather than in isolation).
+  - `player.ts`'s `spawnPosition` stubbed to `return { x: 0, y: 0 }`:
+    exactly the 2 non-origin `spawnPosition` tests in `spec/size.test.ts`
+    went red with the actual (wrong) `0` in the diff; the origin-tile test
+    stayed green by coincidence of the stub, which is why it's not the
+    only test in that block.
+  New: `spec/rules.test.ts` gained an `isRoomDead`/`hasWon`/`nextStatus`
+  isolation block plus room-1/room-2/room-3 `RoomState` fixtures (hand-
+  built to mirror plan.md §9's designs — not real rooms; `spec/rooms.test.ts`'s
+  tripwire still correctly reports zero files in `src/game/rooms/`, and
+  this issue did not touch it). `spec/size.test.ts` gained `spawnPosition`
+  coverage.
+  **Not built** (explicit scope cut, per this issue's brief): the
+  solver (#8), real rooms (#9), the rewind ghost/visual effect (#15), the
+  no-instructions sensor (#12). Did not touch
+  `resolveFragileContact`'s contact rules.
+  **Unverified**: `list_connected_browsers` returned `[]` again this
+  session — restarting from the loss/win screen, the pulse/darken/fade
+  visuals, and reaching the demo room's exit to trigger `hasWon` are all
+  only verified at the unit-test level, not by a human/browser
+  playthrough. Flagging alongside the same gap in every prior session's
+  log entry.
+  `pnpm check` green, 205 tests (up from 188 — 17 new: 14 in
+  `spec/rules.test.ts`, 3 in `spec/size.test.ts`).

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Destroyed, PhysicsLevel } from "../src/game/physics";
 import { arm, enterRewindTile, rewind, type Anchor } from "../src/game/rewind";
+import { hasWon, isRoomDead, nextStatus, type FatalPredicate, type RoomState } from "../src/game/rules";
 
 // Issue #6's acceptance criteria (gh issue view 6) — the rewind machine,
 // which plan.md calls "the game's central invariant". This is the focused
@@ -330,5 +331,221 @@ describe("rewinding with no anchor armed is a safe no-op", () => {
     expect(result.y).toBe(23);
     expect(result.size).toBe("large");
     expect(result.destroyed).toBe(destroyed);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #7: loss/win rules (plan.md §6/§9). `RoomState` fixtures below are
+// built by hand, not by driving physics.ts/world.ts — isRoomDead/hasWon are
+// pure functions of the state shape rules.ts defines, and this is exactly
+// the "explicit state, not module-level globals" contract issue #8's
+// solver depends on (see rules.ts's file header). Room fixtures mirror
+// plan.md §9's designs closely enough to exercise the real shapes each
+// room's fatal-predicate list would take, but are NOT the real rooms —
+// issue 9 authors those; spec/rooms.test.ts's tripwire is what forces that
+// distinction to stay visible.
+function makeState(overrides: Partial<RoomState> = {}): RoomState {
+  return {
+    playerTileX: 0,
+    playerTileY: 0,
+    size: "small",
+    destroyed: new Set(),
+    anchor: null,
+    ...overrides,
+  };
+}
+
+describe("isRoomDead / hasWon: the primitives in isolation", () => {
+  it("isRoomDead is false when fatal is empty, regardless of state — rooms 1 and 2's list", () => {
+    expect(isRoomDead(makeState({ size: "large" }), [])).toBe(false);
+  });
+
+  it("isRoomDead is true the moment any one predicate in the list holds", () => {
+    const neverFires: FatalPredicate = () => false;
+    const fires: FatalPredicate = (state) => state.destroyed.has("9,9");
+    const state = makeState({ destroyed: new Set(["9,9"]) });
+    expect(isRoomDead(state, [neverFires, fires])).toBe(true);
+  });
+
+  it("isRoomDead does not short-circuit past a predicate that would throw on a mismatched state — every predicate in the list is authored against the same RoomState shape", () => {
+    // Not a throw test — just documents that predicates are plain
+    // functions evaluated left-to-right via Array#some; order in the
+    // authored list has no bearing on correctness, only on which one a
+    // human would look at first when debugging a false loss.
+    const first: FatalPredicate = () => false;
+    const second: FatalPredicate = () => false;
+    expect(isRoomDead(makeState(), [first, second])).toBe(false);
+  });
+
+  it("hasWon is true exactly when the player's feet-tile matches the exit cell", () => {
+    const exit = { x: 12, y: 4 };
+    expect(hasWon(makeState({ playerTileX: 12, playerTileY: 4 }), exit)).toBe(true);
+    expect(hasWon(makeState({ playerTileX: 12, playerTileY: 5 }), exit)).toBe(false);
+    expect(hasWon(makeState({ playerTileX: 11, playerTileY: 4 }), exit)).toBe(false);
+  });
+
+  it("nextStatus is sticky: once lost or won, later frames never move it back to playing", () => {
+    const exit = { x: 0, y: 0 };
+    const alwaysDead: FatalPredicate = () => true;
+    const lost = nextStatus("playing", makeState(), [alwaysDead], exit);
+    expect(lost).toBe("lost");
+    // Same call, but current status is already "lost" and the state no
+    // longer matches any fatal predicate — must stay "lost".
+    const stillLost = nextStatus("lost", makeState(), [], exit);
+    expect(stillLost).toBe("lost");
+  });
+
+  it("nextStatus: won beats playing the instant the exit tile is reached, with no fatal predicates involved", () => {
+    const exit = { x: 3, y: 3 };
+    const state = makeState({ playerTileX: 3, playerTileY: 3 });
+    expect(nextStatus("playing", state, [], exit)).toBe("won");
+  });
+});
+
+// Room 1 (plan.md §9): growth pad -> mandatory fragile wall -> coolant ->
+// one-tile gap -> exit. "No loss is possible here" — fatal is empty, so
+// every state along the intended path (and any other reachable state) must
+// read as alive.
+describe("room 1 fixture (plan.md §9): no loss is possible", () => {
+  const ROOM1_FATAL: FatalPredicate[] = [];
+  const wallKey = "5,1";
+
+  const solutionPath: RoomState[] = [
+    makeState({ playerTileX: 1, playerTileY: 1 }), // spawn, small
+    makeState({ playerTileX: 3, playerTileY: 1 }), // walked onto the growth pad
+    makeState({ playerTileX: 3, playerTileY: 1, size: "large" }), // grew
+    makeState({ playerTileX: 5, playerTileY: 1, size: "large", destroyed: new Set([wallKey]) }), // broke the mandatory wall
+    makeState({ playerTileX: 7, playerTileY: 1, size: "small", destroyed: new Set([wallKey]) }), // dropped into coolant, shrank
+    makeState({ playerTileX: 9, playerTileY: 1, size: "small", destroyed: new Set([wallKey]) }), // through the one-tile gap
+    makeState({ playerTileX: 10, playerTileY: 1, size: "small", destroyed: new Set([wallKey]) }), // at the exit
+  ];
+
+  it("isRoomDead is false at every state along the intended solution path", () => {
+    for (const state of solutionPath) {
+      expect(isRoomDead(state, ROOM1_FATAL)).toBe(false);
+    }
+  });
+});
+
+// Room 2 (plan.md §9): rewind machine -> drop -> growth pad -> fragile wall
+// (dead end behind it) -> rewind -> the broken wall is now a route.
+// "No loss is possible here" — fatal is empty per plan.md, even though the
+// intended path deliberately walks the player into what would look like a
+// dead end (a wrong predicate might have flagged this; the room's real
+// list, correctly, has none).
+describe("room 2 fixture (plan.md §9): no loss is possible, even mid-\"dead end\"", () => {
+  const ROOM2_FATAL: FatalPredicate[] = [];
+  const wallKey = "4,3";
+
+  const solutionPath: RoomState[] = [
+    makeState({ playerTileX: 1, playerTileY: 0 }), // spawn, small
+    makeState({ playerTileX: 1, playerTileY: 0, anchor: { x: 10, y: 0, size: "small" } }), // armed the machine
+    makeState({ playerTileX: 2, playerTileY: 3, anchor: { x: 10, y: 0, size: "small" } }), // one-way drop
+    makeState({ playerTileX: 2, playerTileY: 3, size: "large", anchor: { x: 10, y: 0, size: "small" } }), // grew
+    makeState({
+      playerTileX: 4,
+      playerTileY: 3,
+      size: "large",
+      destroyed: new Set([wallKey]),
+      anchor: { x: 10, y: 0, size: "small" },
+    }), // broke the wall — a dead end from here
+    makeState({ playerTileX: 10, playerTileY: 0, size: "small", destroyed: new Set([wallKey]) }), // rewound to the alcove
+    makeState({ playerTileX: 4, playerTileY: 3, size: "small", destroyed: new Set([wallKey]) }), // the broken wall, now a route
+  ];
+
+  it("isRoomDead is false at every state along the intended solution path, including standing at the 'dead end'", () => {
+    for (const state of solutionPath) {
+      expect(isRoomDead(state, ROOM2_FATAL)).toBe(false);
+    }
+  });
+});
+
+// Room 3 (plan.md §9): the room that CAN be lost. Two fragile walls: A
+// (opens the intended upper route) and B (the ledge that carries the only
+// approach to the coolant — breaking it while large permanently forecloses
+// ever being small again, and the one-tile gap on the intended route needs
+// the small hitbox). B's fatal predicate matches plan.md §6's own worked
+// example shape almost exactly: "destroyed.has(wallB) [and no other route
+// to coolant exists, which in this fixture's geometry is unconditional —
+// B genuinely is the only approach, per plan.md §9's room 3 description]."
+describe("room 3 fixture (plan.md §9): the wrong break is fatal, the intended break is not", () => {
+  const wallAKey = "8,2"; // intended: opens the upper route
+  const wallBKey = "3,5"; // wrong: the coolant-ledge break
+
+  // Authored exactly like plan.md §6's own example — the room's one fatal
+  // condition is "wall B has been broken" (in this fixture, B truly is the
+  // only approach to coolant, so no separate canReachCoolant() helper is
+  // needed to express plan.md's "and !canReachCoolant(w)" clause; a real
+  // room-3 with a more complex layout might need one).
+  const ROOM3_FATAL: FatalPredicate[] = [(state) => state.destroyed.has(wallBKey)];
+
+  const solutionPath: RoomState[] = [
+    makeState({ playerTileX: 1, playerTileY: 5 }), // spawn, small
+    makeState({ playerTileX: 2, playerTileY: 5, anchor: { x: 10, y: 50, size: "small" } }), // armed the machine, small
+    makeState({ playerTileX: 4, playerTileY: 5, size: "large", anchor: { x: 10, y: 50, size: "small" } }), // grew
+    makeState({
+      playerTileX: 8,
+      playerTileY: 2,
+      size: "large",
+      destroyed: new Set([wallAKey]),
+      anchor: { x: 10, y: 50, size: "small" },
+    }), // broke wall A — opens the upper route
+    makeState({
+      playerTileX: 10,
+      playerTileY: 50,
+      size: "small",
+      destroyed: new Set([wallAKey]),
+      anchor: { x: 10, y: 50, size: "small" },
+    }), // rewound — back small, at the alcove
+    makeState({ playerTileX: 8, playerTileY: 2, size: "small", destroyed: new Set([wallAKey]) }), // through the upper route, one-tile gap
+    makeState({ playerTileX: 20, playerTileY: 0, size: "small", destroyed: new Set([wallAKey]) }), // at the exit
+  ];
+
+  it("isRoomDead is false at every state along the intended solution path", () => {
+    for (const state of solutionPath) {
+      expect(isRoomDead(state, ROOM3_FATAL)).toBe(false);
+    }
+  });
+
+  it("breaking wall A alone (the intended break) never triggers loss, at any size or position", () => {
+    const destroyed = new Set([wallAKey]);
+    expect(isRoomDead(makeState({ size: "large", destroyed }), ROOM3_FATAL)).toBe(false);
+    expect(isRoomDead(makeState({ size: "small", destroyed, playerTileX: 99, playerTileY: 99 }), ROOM3_FATAL)).toBe(
+      false,
+    );
+  });
+
+  it("THE WRONG BREAK: breaking wall B while large is fatal — the room-3 wrong-break state", () => {
+    const wrongBreakState = makeState({
+      playerTileX: 3,
+      playerTileY: 5,
+      size: "large",
+      destroyed: new Set([wallBKey]),
+      anchor: null,
+    });
+    expect(isRoomDead(wrongBreakState, ROOM3_FATAL)).toBe(true);
+  });
+
+  it("breaking both walls (A intended, B wrong) is still fatal — B alone is sufficient, A doesn't excuse it", () => {
+    const state = makeState({ size: "large", destroyed: new Set([wallAKey, wallBKey]) });
+    expect(isRoomDead(state, ROOM3_FATAL)).toBe(true);
+  });
+
+  it("rewind cannot undo the wrong break — the fatal state is still fatal after an anchor is armed and used", () => {
+    // plan.md §9, verbatim: "Rewind does not help: it returns you, not the
+    // ledge." A rewind changes playerTileX/Y/size/anchor but never
+    // `destroyed` (rewind.ts's whole contract) — so the same destroyed set
+    // stays fatal no matter what the other fields say.
+    const destroyed = new Set([wallBKey]);
+    const beforeRewind = makeState({ playerTileX: 3, playerTileY: 5, size: "large", destroyed });
+    const afterRewind = makeState({
+      playerTileX: 1,
+      playerTileY: 5,
+      size: "small",
+      destroyed, // same reference — rewind.ts never touches this
+      anchor: { x: 10, y: 50, size: "small" },
+    });
+    expect(isRoomDead(beforeRewind, ROOM3_FATAL)).toBe(true);
+    expect(isRoomDead(afterRewind, ROOM3_FATAL)).toBe(true);
   });
 });

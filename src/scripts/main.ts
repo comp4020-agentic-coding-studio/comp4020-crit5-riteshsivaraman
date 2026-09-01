@@ -33,9 +33,16 @@ import {
   initialSizeState,
   PLAYER_COLOR,
   requestSizeChange,
+  spawnPosition,
   transitionScale,
   type PlayerSizeState,
 } from "../game/player";
+// Issue #7: loss/win. rules.ts's isRoomDead/hasWon are pure functions of a
+// RoomState this file assembles fresh every frame from playerBody/sizeState/
+// demoWorld/armed — see rules.ts's header for why that shape (not World,
+// not Level) is what issue #8's solver needs too.
+import { isRoomDead, hasWon, type RoomState, type Status } from "../game/rules";
+import { restart as restartWorld } from "../game/world";
 // Issue #6: rewind machine. Pure module — see notes/agents/log.md [#6] for
 // why it takes structural parameters instead of importing world.ts (which
 // doesn't exist in this demo wiring either; #5/#6 both replace this file's
@@ -173,9 +180,10 @@ let demoWorld: World = createWorld();
 // throwaway 8x16 placeholder per that issue's own log entry ("do not treat
 // it as load-bearing" — this is the Builder that gets to decide).
 let sizeState: PlayerSizeState = initialSizeState("small");
+const initialSpawn = spawnPosition(demoLevel.spawn, "small");
 const player: PlayerRect = {
-  x: demoLevel.spawn.x * TILE,
-  y: demoLevel.spawn.y * TILE - (HITBOX.small.height - TILE),
+  x: initialSpawn.x,
+  y: initialSpawn.y,
   width: HITBOX.small.width,
   height: HITBOX.small.height,
   color: PLAYER_COLOR.small,
@@ -238,6 +246,103 @@ function togglePause(): void {
 let armed: ArmedState | null = null;
 let wasOnRewindTile = false;
 
+// Issue #7: loss/win/restart. `status` starts "playing" and only ever moves
+// via rules.ts's isRoomDead/hasWon (computed at the end of every step() —
+// see below) or restartRoom() setting it back. step() itself goes inert
+// the instant status leaves "playing" (its first line, below); the only
+// way out is the end-screen glyph, wired directly to restartRoom(), never
+// routed back through step()/paused.
+let status: Status = "playing";
+
+// ---------------------------------------------------------------------------
+// End screen — plan.md §6/§9: "no text explains anything, no stats, no
+// score." A single glyph, DOM-based (not canvas-drawn: RenderCtx has no
+// fillText — see render.ts's header for why its surface stays that narrow
+// — so a real glyph needs a real element, the same way input.ts's pause/
+// rewind controls are DOM elements rather than canvas blits).
+// ---------------------------------------------------------------------------
+const endScreenStyle = document.createElement("style");
+endScreenStyle.textContent = `
+  @keyframes remnant-loss-pulse {
+    0%, 100% { background: rgba(18, 3, 14, 0.86); }
+    50% { background: rgba(74, 10, 58, 0.62); }
+  }
+  #end-screen { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 20; }
+  #end-screen.end-screen--lost { display: flex; animation: remnant-loss-pulse 1.8s ease-in-out infinite; }
+  #end-screen.end-screen--won { display: flex; background: #000; }
+  #end-screen .end-glyph { font-size: 48px; line-height: 1; color: #e8b8ff; cursor: pointer; user-select: none; }
+`;
+document.head.appendChild(endScreenStyle);
+
+const endScreen = document.createElement("div");
+endScreen.id = "end-screen";
+shell.appendChild(endScreen);
+
+function hideEndScreen(): void {
+  endScreen.className = "";
+  endScreen.replaceChildren();
+}
+
+/** One glyph, one job: activating it restarts the room. Same pointer/no-
+ * delayed-click convention as input.ts's own controls (pointerdown, not
+ * click) — this file doesn't import input.ts's private bindPad, but the
+ * effect (immediate, no 300ms tap delay) matters just as much here. */
+function makeEndGlyph(glyph: string, label: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "end-glyph";
+  el.textContent = glyph;
+  el.setAttribute("role", "button");
+  el.setAttribute("aria-label", label);
+  el.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    restartRoom();
+  });
+  return el;
+}
+
+function showLossScreen(): void {
+  endScreen.className = "end-screen--lost";
+  endScreen.replaceChildren(makeEndGlyph("↻", "Restart"));
+}
+
+function showWinScreen(): void {
+  endScreen.className = "end-screen--won";
+  endScreen.replaceChildren(makeEndGlyph("►", "Play again"));
+}
+
+/**
+ * Rebuilds the room from its ASCII source, per plan.md §6/issue #7's
+ * Done-when: `destroyed` empty, `anchor`/`armed` null, player at spawn —
+ * all reassigned together, in this one function, so nothing that reads
+ * any of them mid-restart can observe a torn state. Also the fix for the
+ * Reviewer's confirmed-at-module-level finding: `rewind()` trusts arm-time
+ * occupancy only because `destroyed` is monotone within a room, and
+ * `restart()` (world.ts) is the one operation that breaks that — reusing
+ * a pre-restart anchor after this point would place the body inside
+ * geometry restart just re-solidified. Resetting `armed`/`wasOnRewindTile`
+ * here, in the same operation that reassigns `demoWorld`, is what keeps
+ * that reachable-but-never-armed bug from ever actually firing.
+ */
+function restartRoom(): void {
+  demoWorld = restartWorld();
+  sizeState = initialSizeState("small");
+  const spawn = spawnPosition(demoLevel.spawn, "small");
+  playerBody = createBody(spawn.x, spawn.y, HITBOX.small.width, HITBOX.small.height);
+  armed = null;
+  wasOnRewindTile = false;
+  inputController.setMachineArmed(false);
+  debris = [];
+  shakeMs = 0;
+  impactMs = 0;
+  player.x = spawn.x;
+  player.y = spawn.y;
+  player.width = HITBOX.small.width;
+  player.height = HITBOX.small.height;
+  player.color = PLAYER_COLOR.small;
+  status = "playing";
+  hideEndScreen();
+}
+
 // Runs the player back to the armed anchor, per plan.md's brief
 // ("re-entering it, or the contextual rewind control, returns the player
 // to that anchor"). `rewind()` itself never touches `demoWorld.destroyed`
@@ -297,6 +402,13 @@ const inputController = createInputController({
 });
 
 function step(fixedDeltaMs: number): void {
+  // Issue #7: once lost/won, the room is frozen — only the end-screen
+  // glyph (restartRoom(), wired directly to its own pointerdown handler,
+  // never through here) moves status again. This is what "the game never
+  // needs a page reload to recover" means operationally: every reachable
+  // dead state still has a live event handler waiting on the DOM, even
+  // though the fixed-step loop itself has gone inert.
+  if (status !== "playing") return;
   if (paused) return;
 
   const input = inputController.getState();
@@ -441,6 +553,29 @@ function step(fixedDeltaMs: number): void {
   player.width = drawWidth;
   player.height = drawHeight;
   player.color = PLAYER_COLOR[sizeState.size];
+
+  // Issue #7: the loss/win check, once per step, from a RoomState
+  // assembled fresh from this frame's real values — never a second copy
+  // of any of them. `demoLevel.fatal` is empty in this throwaway demo
+  // room (issue #9 authors real rooms with real predicates), so
+  // isRoomDead is always false here; hasWon fires the moment the feet
+  // tile matches `demoLevel.exit`, which main.ts's demo room does place
+  // (see buildDemoRows) — reaching it is driveable today even without a
+  // real room.
+  const roomState: RoomState = {
+    playerTileX: feetTileX,
+    playerTileY: feetTileY,
+    size: sizeState.size,
+    destroyed: demoWorld.destroyed,
+    anchor: armed?.anchor ?? null,
+  };
+  if (isRoomDead(roomState, demoLevel.fatal)) {
+    status = "lost";
+    showLossScreen();
+  } else if (hasWon(roomState, demoLevel.exit)) {
+    status = "won";
+    showWinScreen();
+  }
 }
 
 function render(): void {

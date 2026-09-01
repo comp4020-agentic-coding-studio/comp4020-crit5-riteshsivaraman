@@ -9,6 +9,7 @@ import {
   initialSizeState,
   requestSizeChange,
   sizeChangeAnchor,
+  spawnPosition,
   transitionScale,
 } from "../src/game/player";
 
@@ -158,6 +159,36 @@ describe("safe-growth predicate: canChangeSize / canOccupy", () => {
     const broken: Destroyed = new Set(["3,1"]);
     expect(canOccupy(x, y, HITBOX.small.width, HITBOX.small.height, level, stillFragile)).toBe(false);
     expect(canOccupy(x, y, HITBOX.small.width, HITBOX.small.height, level, broken)).toBe(true);
+  });
+});
+
+// Issue #7: extracted out of main.ts's original inline spawn-placement
+// arithmetic (`spawn.y * TILE - (HITBOX.small.height - TILE)`) so restart
+// and boot place the player from one tested function, not two copies of
+// the same formula. TILE = 10 (tiles.ts).
+describe("spawnPosition: where a fresh (or restarted) player lands (issue #7)", () => {
+  it("small body: top-left sits inside a 1-tile spawn cell, bottom edge flush with the tile's bottom", () => {
+    const pos = spawnPosition({ x: 2, y: 3 }, "small");
+    expect(pos.x).toBe(20);
+    // Bottom edge = (spawn.y + 1) * TILE = 40; top = 40 - height(10) = 30.
+    expect(pos.y).toBe(30);
+  });
+
+  it("large body: same x, but the top edge sits higher — the extra height grows upward from the same floor", () => {
+    const pos = spawnPosition({ x: 2, y: 3 }, "large");
+    expect(pos.x).toBe(20);
+    // Bottom edge is still 40; top = 40 - height(20) = 20.
+    expect(pos.y).toBe(20);
+    // Both sizes share the same floor line (bottom edge), i.e. feet
+    // planted at the same place regardless of size.
+    const small = spawnPosition({ x: 2, y: 3 }, "small");
+    expect(pos.y + HITBOX.large.height).toBe(small.y + HITBOX.small.height);
+  });
+
+  it("spawn at the origin tile places the body with no negative coordinates", () => {
+    const pos = spawnPosition({ x: 0, y: 0 }, "small");
+    expect(pos.x).toBe(0);
+    expect(pos.y).toBe(0);
   });
 });
 

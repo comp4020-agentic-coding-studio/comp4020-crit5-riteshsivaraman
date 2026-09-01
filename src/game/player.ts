@@ -11,6 +11,7 @@
 //     (plan.md §8: "2 tiles headroom and 2 tiles width" for every `G`)
 import type { Destroyed, PhysicsLevel } from "./physics";
 import { isSolidAt as isSolidAtLevel, type Level } from "./level";
+import { TILE } from "./tiles";
 
 // ---------------------------------------------------------------------------
 // Sizes
@@ -217,6 +218,33 @@ export function transitionScale(state: PlayerSizeState): TransitionScale {
   const bump = Math.sin(t * Math.PI) * 0.18;
   const growing = state.transition.to === "large";
   return growing ? { scaleX: 1 - bump, scaleY: 1 + bump } : { scaleX: 1 + bump, scaleY: 1 - bump };
+}
+
+// ---------------------------------------------------------------------------
+// spawnPosition — where a fresh (or restarted) player lands
+// ---------------------------------------------------------------------------
+
+/**
+ * Pixel top-left for a body of `size` spawning at tile `spawn`, feet
+ * planted on the spawn tile's floor (bottom edge flush with the bottom of
+ * that tile) — the same convention `sizeChangeAnchor` uses for a
+ * grow/shrink, applied once at the start of a room instead of on every
+ * size change. Issue #7: extracted out of `main.ts`'s original inline
+ * `spawn.y * TILE - (HITBOX.small.height - TILE)` (issue #14's original
+ * boot wiring) so both boot *and* restart place the player identically,
+ * from one tested function rather than two copies of the same arithmetic
+ * that could drift apart. Always spawns at the tile's bottom edge
+ * regardless of `size` — a room's spawn tile is authored assuming the
+ * player starts small (plan.md §9's rooms all open in the small state),
+ * but this takes `size` explicitly rather than hard-coding that
+ * assumption, matching every other size-aware placement in this module.
+ */
+export function spawnPosition(spawn: { x: number; y: number }, size: Size): { x: number; y: number } {
+  const box = HITBOX[size];
+  return {
+    x: spawn.x * TILE,
+    y: (spawn.y + 1) * TILE - box.height,
+  };
 }
 
 // ---------------------------------------------------------------------------
