@@ -1,17 +1,25 @@
+html,
 body {
   margin: 0;
+  /* Deliberately no overflow-x: hidden/clip here — see
+     spec/no-scroll-mask.test.ts. If the layout ever overflows
+     horizontally, that must show up as a real scrollbar, not be masked. */
+}
+
+body {
   font-family: system-ui, sans-serif;
   line-height: 1.6;
-  color: #1a1a1a;
-  overflow-x: hidden;
+  color: #f5f0e6;
+  background: #08080a;
 }
 
 header {
   padding: 0.5rem 1rem;
+  background: #08080a;
 }
 
 nav a {
-  color: #0b5fff;
+  color: #7fb4ff;
 }
 
 main {
@@ -22,7 +30,7 @@ main h1 {
   margin: 0;
   padding: 0.25rem 1rem 0.75rem;
   font-size: 1.5rem;
-  background: #101014;
+  background: #1c1c22;
   color: #f5f0e6;
 }
 
@@ -44,4 +52,3 @@ main h1 {
 #game-controls {
   background: #1c1c22;
 }
-

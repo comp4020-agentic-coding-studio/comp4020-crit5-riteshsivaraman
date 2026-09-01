@@ -139,3 +139,23 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   allow-list. Also stripped `//` line comments before matching, so a comment
   merely mentioning a browser API doesn't trip it (block comments and string
   contents are left alone — a parser is more sensor than this needs).
+- **Builder-Tester** [#1 #10 #12] — Ritesh's real-browser measurement caught a
+  genuine `overflow-x: true` that `pnpm check` couldn't see: `main.ts` sized
+  `#game-shell` from `window.innerWidth`, which includes the vertical
+  scrollbar's width, while the content box doesn't have it — an overflow by
+  exactly the scrollbar width. `body { overflow-x: hidden }` (src/styles/
+  styles.css) had hidden the symptom instead of the layout being correct, so
+  the "no horizontal scroll" criterion was unfalsifiable. Wrote
+  `spec/no-scroll-mask.test.ts` first, confirmed it RED against the mask
+  (`body sets overflow(-x): hidden/clip` — the exact failure text is in this
+  session's report), then removed the mask and switched both width and
+  height reads in `main.ts` to `document.documentElement.clientWidth`/
+  `clientHeight`, which exclude the scrollbar. Not re-verified in a real
+  browser this session (extension still not connected) — logically sound and
+  `pnpm check` green, but Ritesh's next real-browser pass should re-measure
+  `overflowsX` specifically, not just assume the sensor's presence fixed it.
+  Also gave the page chrome (`body`/`header`/`nav a`) the dark palette and
+  gave `main h1` a background distinct from `#game-canvas`'s, since white
+  chrome with default blue links above a black canvas, and an h1 band
+  identical in colour to the canvas, both read as an unfinished template —
+  cosmetic only, no game rules touched.

@@ -42,17 +42,23 @@ function applyLayout(current: Layout): void {
     shell.style.height = `${canvasRect.height + controlsRect.height}px`;
   } else {
     controls.hidden = true;
-    shell.style.height = `${window.innerHeight}px`;
+    shell.style.height = `${document.documentElement.clientHeight}px`;
   }
 }
 
 function resize(): void {
-  shell.style.width = `${window.innerWidth}px`;
+  // clientWidth/clientHeight are the content box of the root element —
+  // they exclude the vertical scrollbar's own width (window.innerWidth
+  // does not), so sizing the shell to this never overflows horizontally
+  // by the scrollbar's width the way window.innerWidth did.
+  const viewportWidth = document.documentElement.clientWidth;
+  shell.style.width = `${viewportWidth}px`;
   // Lay the game out in whatever height remains below the header/h1, not
   // the full viewport height, so the page never grows taller than the
   // viewport and never needs a vertical scrollbar either.
-  const availableHeight = window.innerHeight - shell.getBoundingClientRect().top;
-  applyLayout(layout(window.innerWidth, Math.max(1, Math.floor(availableHeight))));
+  const availableHeight =
+    document.documentElement.clientHeight - shell.getBoundingClientRect().top;
+  applyLayout(layout(viewportWidth, Math.max(1, Math.floor(availableHeight))));
 }
 
 window.addEventListener("resize", resize);
