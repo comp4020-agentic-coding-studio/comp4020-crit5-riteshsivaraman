@@ -704,3 +704,57 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   red across both files. Any future issue that lets a rewind path reach
   `breakTile`/`restart`, or that returns a new Set from `rewind()`, now fails
   here rather than at the crit.
+- **Builder-Tester** [#6 #7 #9] — fixed the Reviewer pass's five findings
+  against rewind, all test-first:
+  1. Rewind had no keyboard trigger, and the only on-screen `↺` control
+     lives inside `#game-controls`, which layout.ts/main.ts/styles.css make
+     `display: none` in landscape (1920x1080) — rewind was unreachable at a
+     marking viewport. Added `KeyR` to `input.ts`, edge-triggered on
+     non-repeat keydown exactly like Escape/`PAUSE_CODES`. Red-first: new
+     `spec/input.test.ts` cases (KeyR with the controls container never
+     attached to the document; KeyR repeat-suppression) failed with 0 calls
+     before the code existed.
+  2/3. The re-entry guard (`anchor.x === playerBody.x` on floats) almost
+     never matched after walking off and back, so every pass re-armed —
+     including overwriting the anchor's *size*, which would have made
+     plan.md §9 room 3 unsolvable (grow, walk back over the machine,
+     rewind now returns you large, not small — the one-tile gap is dead).
+     Fixed by moving the whole "feet entered the R tile" decision into a
+     new pure `enterRewindTile()` in `rewind.ts`, keyed on tile coordinates
+     (`ArmedState.tile`), never on the body's pixel position. main.ts now
+     persists `armed: ArmedState | null` instead of a bare `Anchor`. Red
+     first: `spec/rules.test.ts`'s new `enterRewindTile` describe block hit
+     `TypeError: enterRewindTile is not a function` before it existed;
+     added the room-3 regression test explicitly (arm small -> grow ->
+     re-enter the same tile -> anchor still small -> rewinding from it
+     returns small) so this can't regress silently again.
+  4. `rewind()` trusted arm-time `canOccupy` unconditionally, which is only
+     sound while `destroyed` is monotone — a guarantee only `restart()`
+     (unwired, issue #7's) can break. Added an optional, separately-typed
+     `level`/`occupancyDestroyed` re-check to `RewindInput<D>` — kept
+     deliberately outside the generic `D` so `destroyed: D` stays
+     unconstrained (spec/rules.test.ts's reference-identity and non-Set
+     round-trip tests still pass untouched). Red first: a "geometry
+     re-solidified since arm" test asserted `triggered: false` and got
+     `true` before the check existed.
+  5. `triggerRewind()` spread the old body, carrying `vx/vy/grounded/
+     coyoteMs/jumpBufferMs` through the teleport (free momentum or a free
+     coyote jump). Now zeroes/reset all five on every triggered rewind.
+     Not independently red/green-tested in isolation (no physics-level
+     assertion existed to break first) — covered by hand-reading the new
+     `triggerRewind` body plus `pnpm check` staying green; flagging as an
+     honest gap rather than claiming a test that doesn't exist.
+  Also: arming played zero SFX (the only signal — the `↺` control
+  appearing — is inside the landscape `display: none` container), which
+  breaks the no-tutorial rule. Reused the existing `"rewind"` SFX
+  (`playSfx`) on a successful arm rather than inventing a new sound in
+  `src/game/audio.ts`, per the orchestrator's explicit hold on the
+  violet-pulse/ghost visual.
+  Did not touch `resolveFragileContact`'s contact rules or wire
+  `restart()` — both stay issue #7/#9's, per this pass's brief.
+  **Unverified**: no browser was available this session
+  (`list_connected_browsers` / `tabs_context_mcp` both failed to connect) —
+  the KeyR trigger, the arm SFX, and the room-3 sequence are all only
+  verified at the unit-test level, not by a human/browser playthrough.
+  `pnpm check` green, 188 tests (up from 178 — 10 new: 2 in
+  `spec/input.test.ts`, 8 in `spec/rules.test.ts`).

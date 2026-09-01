@@ -76,6 +76,23 @@ export type RewindInput<D> = {
    * see this file's header for why the type system, not just this
    * function's body, guarantees that. */
   destroyed: D;
+  /**
+   * Reviewer finding #4: `rewind()` used to trust `arm()`'s canOccupy
+   * check unconditionally, which is sound only because `destroyed` is
+   * monotone within a room — a guarantee `restart()` (world.ts) can
+   * break. Both `level` and `occupancyDestroyed` are typed concretely
+   * (`PhysicsLevel`/`Destroyed`), deliberately kept separate from the
+   * unconstrained `destroyed: D` above rather than folding the check into
+   * it — constraining `D` would weaken the exact structural guarantee
+   * this file's header (and spec/rules.test.ts's reference-identity and
+   * non-Set round-trip tests) depend on. Optional and omittable: existing
+   * callers/tests that don't pass `level` get the old unconditional
+   * behaviour (no way to re-check occupancy without a level).
+   */
+  level?: PhysicsLevel;
+  /** Only consulted alongside `level`, above; ignored otherwise. Kept
+   * distinct from `destroyed: D` for the same reason. */
+  occupancyDestroyed?: Destroyed;
 };
 
 export type RewindOutput<D> = {
@@ -106,9 +123,33 @@ export type RewindOutput<D> = {
  * pass straight through unchanged, `triggered: false`.
  */
 export function rewind<D>(input: RewindInput<D>): RewindOutput<D> {
-  if (!input.anchor) {
-    return { x: input.x, y: input.y, size: input.size, destroyed: input.destroyed, triggered: false };
+  const noop = (): RewindOutput<D> => ({
+    x: input.x,
+    y: input.y,
+    size: input.size,
+    destroyed: input.destroyed,
+    triggered: false,
+  });
+
+  if (!input.anchor) return noop();
+
+  // Finding #4: belt-and-braces re-check. Only runs when a caller opts in
+  // by passing `level` (main.ts always will; existing tests that predate
+  // this fix and never pass it keep their original unconditional
+  // behaviour, per the field's docs on RewindInput).
+  if (input.level) {
+    const box = HITBOX[input.anchor.size];
+    const fits = canOccupy(
+      input.anchor.x,
+      input.anchor.y,
+      box.width,
+      box.height,
+      input.level,
+      input.occupancyDestroyed ?? (new Set<string>() as Destroyed),
+    );
+    if (!fits) return noop();
   }
+
   return {
     x: input.anchor.x,
     y: input.anchor.y,
@@ -116,4 +157,60 @@ export function rewind<D>(input: RewindInput<D>): RewindOutput<D> {
     destroyed: input.destroyed,
     triggered: true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// enterRewindTile — the per-frame "feet just entered an R tile" decision
+// ---------------------------------------------------------------------------
+
+/** Tile coordinates (not pixels) of the machine cell an anchor was armed
+ * at. Reviewer finding #2: the re-entry guard must compare this, never
+ * `anchor.x === body.x` on sub-pixel floats — a player who walks off and
+ * back essentially never reproduces the exact float the body sat at when
+ * it armed. */
+export type Tile = { x: number; y: number };
+
+/** What main.ts (or any caller) persists across frames: the currently
+ * armed anchor, tagged with the tile it was armed at. `null` means no
+ * machine has ever armed successfully. */
+export type ArmedState = { anchor: Anchor; tile: Tile };
+
+export type EnterRewindTileResult =
+  | { action: "rewind" }
+  | { action: "armed"; anchor: Anchor; tile: Tile }
+  | { action: "refused" };
+
+/**
+ * The whole "player's feet entered an R tile this frame" decision, called
+ * once per edge-trigger (entered this frame, wasn't on it last frame —
+ * main.ts's existing wasOnRewindTile bookkeeping is unchanged). Re-
+ * entering the SAME tile an anchor is already armed at always rewinds,
+ * never re-arms — independent of the body's current size or its exact
+ * sub-pixel position. This is what fixes finding #3 as a side effect of
+ * fixing #2: since re-arming never happens on a repeat visit to the same
+ * tile, the anchor's size can never be silently overwritten by growing and
+ * walking back over it, which is the mechanism plan.md §9's room 3 (arm
+ * small, grow, take the long way, rewind small through the one-tile gap)
+ * depends on.
+ *
+ * A different tile always attempts a fresh `arm()` — including when one
+ * is already armed elsewhere; multiple machines each keep their own tile
+ * identity, but this module (like `arm`/`rewind`) only tracks the single
+ * "currently armed" anchor plan.md §6 describes, same as before this fix.
+ */
+export function enterRewindTile(
+  armed: ArmedState | null,
+  feetTile: Tile,
+  x: number,
+  y: number,
+  size: Size,
+  level: PhysicsLevel,
+  destroyed: Destroyed,
+): EnterRewindTileResult {
+  if (armed && armed.tile.x === feetTile.x && armed.tile.y === feetTile.y) {
+    return { action: "rewind" };
+  }
+  const anchor = arm(x, y, size, level, destroyed);
+  if (!anchor) return { action: "refused" };
+  return { action: "armed", anchor, tile: feetTile };
 }

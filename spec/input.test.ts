@@ -168,6 +168,43 @@ describe("input controller: rewind control activation", () => {
     rewind.dispatchEvent(pointerEvent("pointerdown"));
     expect(onRewindRequest).toHaveBeenCalledTimes(1);
   });
+
+  // Finding #1 (Reviewer): in landscape, layout.ts hides #game-controls
+  // entirely (`display: none`), so the on-screen `↺` control is
+  // unreachable — and until this fix there was no keyboard path either.
+  // KeyR must fire the same callback with the controls container never
+  // even attached to the document, proving the keyboard path is fully
+  // independent of the on-screen control's visibility/existence.
+  it("KeyR fires onRewindRequest even with the controls container detached from the document (landscape: display:none)", () => {
+    const onRewindRequest = vi.fn();
+    // A container that exists but is never appended to document.body —
+    // the landscape `controls.hidden = true` / `display: none` case, only
+    // stricter: this proves the callback doesn't depend on the control
+    // being present in the DOM at all, just on the keyboard listener.
+    const detachedContainer = document.createElement("div");
+    createInputController({
+      keyTarget: window,
+      controlsContainer: detachedContainer,
+      document,
+      onRewindRequest,
+    });
+
+    window.dispatchEvent(keyEvent("keydown", "KeyR"));
+    expect(onRewindRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("KeyR fires once per press, not on OS key-repeat, matching Escape's edge-triggering", () => {
+    const onRewindRequest = vi.fn();
+    setup({ onRewindRequest });
+
+    window.dispatchEvent(keyEvent("keydown", "KeyR"));
+    window.dispatchEvent(keyEvent("keydown", "KeyR", true)); // repeat: true
+    expect(onRewindRequest).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(keyEvent("keyup", "KeyR"));
+    window.dispatchEvent(keyEvent("keydown", "KeyR"));
+    expect(onRewindRequest).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("input controller: touch pads never scroll, zoom, or select text", () => {

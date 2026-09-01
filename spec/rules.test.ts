@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Destroyed, PhysicsLevel } from "../src/game/physics";
-import { arm, rewind, type Anchor } from "../src/game/rewind";
+import { arm, enterRewindTile, rewind, type Anchor } from "../src/game/rewind";
 
 // Issue #6's acceptance criteria (gh issue view 6) — the rewind machine,
 // which plan.md calls "the game's central invariant". This is the focused
@@ -154,6 +154,169 @@ describe("arm() refuses to store an anchor whose body does not fit in that cell"
       y: 1 * TILE,
       size: "small",
     });
+  });
+});
+
+// Reviewer findings #2/#3: the previous re-entry guard (main.ts) compared
+// `anchor.x === playerBody.x` — sub-pixel floats — which essentially never
+// matches after the player has walked off and back, so every pass re-armed
+// instead of rewinding, silently overwriting the anchor's *size* too
+// (breaking plan.md §9 room 3's "arm small, grow, walk back past the
+// machine, rewind small through the gap" solution). `enterRewindTile`
+// replaces that comparison with tile identity, never `===` on a float.
+describe("enterRewindTile: tile-identity re-entry guard (findings #2/#3)", () => {
+  const level = makeLevel(["#########", "#..#....#", "#########"]);
+  const tileX = 6;
+  const tileY = 1;
+  const feetTile = { x: tileX, y: tileY };
+  const px = tileX * TILE;
+  const py = tileY * TILE;
+
+  it("first entry with nothing armed yet: arms at this tile", () => {
+    const destroyed: Destroyed = new Set();
+    const result = enterRewindTile(null, feetTile, px, py, "small", level, destroyed);
+    expect(result).toEqual({ action: "armed", anchor: { x: px, y: py, size: "small" }, tile: feetTile });
+  });
+
+  it("re-entering the SAME tile always rewinds, never re-arms — even at a different sub-pixel position", () => {
+    const destroyed: Destroyed = new Set();
+    const armed = enterRewindTile(null, feetTile, px, py, "small", level, destroyed);
+    if (armed.action !== "armed") throw new Error("expected armed");
+
+    // Same tile, but the body's exact float position has drifted slightly
+    // (e.g. re-entering while still decelerating) — a `===` comparison on
+    // x/y would miss this; tile identity must not.
+    const second = enterRewindTile(
+      { anchor: armed.anchor, tile: armed.tile },
+      feetTile,
+      px + 0.0001,
+      py,
+      "small",
+      level,
+      destroyed,
+    );
+    expect(second).toEqual({ action: "rewind" });
+  });
+
+  it("regression for #3: arm small, grow, walk back over the SAME tile — the anchor's size must not be overwritten", () => {
+    const destroyed: Destroyed = new Set();
+
+    // Arm small.
+    const armed = enterRewindTile(null, feetTile, px, py, "small", level, destroyed);
+    if (armed.action !== "armed") throw new Error("expected armed");
+    const state = { anchor: armed.anchor, tile: armed.tile };
+    expect(state.anchor.size).toBe("small");
+
+    // Player grows to large elsewhere, then walks back over the *same*
+    // machine tile at the *same* pixel position it originally armed at
+    // (the worst case for a floats-based guard: identical position, still
+    // must not re-arm because the size differs) plus a case with a
+    // different position too.
+    const secondPass = enterRewindTile(state, feetTile, px, py, "large", level, destroyed);
+    expect(secondPass).toEqual({ action: "rewind" });
+
+    // A different tile entirely arms independently and does not disturb
+    // the original anchor's stored state (main.ts only updates its local
+    // `anchor`/`armedTile` on an "armed" action, never on "rewind").
+    const untouchedAnchor = armed.anchor;
+    expect(untouchedAnchor.size).toBe("small");
+
+    // Actually rewinding with that untouched anchor returns the player to
+    // small, proving room 3's design survives: growth never leaks into
+    // the anchor once armed.
+    const rewound = rewind({ x: 999, y: 999, size: "large", anchor: untouchedAnchor, destroyed });
+    expect(rewound.triggered).toBe(true);
+    expect(rewound.size).toBe("small");
+  });
+
+  it("a different tile arms a fresh anchor rather than being treated as a re-entry", () => {
+    const destroyed: Destroyed = new Set();
+    const armed = enterRewindTile(null, feetTile, px, py, "small", level, destroyed);
+    if (armed.action !== "armed") throw new Error("expected armed");
+    const state = { anchor: armed.anchor, tile: armed.tile };
+
+    const otherTile = { x: 2, y: 1 };
+    const result = enterRewindTile(state, otherTile, 2 * TILE, 1 * TILE, "small", level, destroyed);
+    expect(result.action).toBe("armed");
+  });
+
+  it("arm() refusing (body doesn't fit) reports 'refused', not a re-arm or a rewind", () => {
+    const tightLevel = makeLevel(["##########", "####.#####", "##########"]);
+    const destroyed: Destroyed = new Set();
+    const result = enterRewindTile(null, { x: 4, y: 1 }, 4 * TILE, 1 * TILE, "large", tightLevel, destroyed);
+    expect(result).toEqual({ action: "refused" });
+  });
+});
+
+// Reviewer finding #4: rewind() trusted arm-time canOccupy unconditionally.
+// That trust breaks the moment `destroyed` shrinks between arm and rewind
+// (only reachable via world.ts's restart(), not wired to any caller today,
+// but the Reviewer confirmed the placement-inside-solid-geometry bug exists
+// at the module level regardless of reachability). rewind() must re-check
+// occupancy itself so the invariant holds by construction, not by "nothing
+// calls restart() yet".
+describe("rewind(): occupancy is re-checked at rewind time (finding #4)", () => {
+  // A 1-tile gap at column 4 — wide enough for the small hitbox once
+  // centred, per the same fixture size.test.ts/rules.test.ts already use.
+  const level = makeLevel(["##########", "####.#####", "##########"]);
+  const gapX = 4 * TILE + 1;
+  const gapY = 1 * TILE;
+
+  it("still triggers when the anchor cell is (still) clear", () => {
+    const destroyed: Destroyed = new Set();
+    const anchor = arm(gapX, gapY, "small", level, destroyed) as Anchor;
+    expect(anchor).not.toBeNull();
+
+    const result = rewind({
+      x: 0,
+      y: 0,
+      size: "large",
+      anchor,
+      destroyed,
+      level,
+      occupancyDestroyed: destroyed,
+    });
+    expect(result.triggered).toBe(true);
+    expect(result.x).toBe(gapX);
+    expect(result.y).toBe(gapY);
+  });
+
+  it("refuses (triggered: false, position untouched) when the anchor cell no longer fits", () => {
+    // Simulate the only way this can happen: geometry the anchor relied on
+    // no longer being clear (e.g. a hypothetical restart() re-solidifying
+    // a tile that was destroyed when this anchor armed). Here we just hand
+    // rewind() a level where that same cell is now solid, standing in for
+    // "the world changed out from under the anchor".
+    const destroyed: Destroyed = new Set();
+    const anchor = arm(gapX, gapY, "small", level, destroyed) as Anchor;
+    expect(anchor).not.toBeNull();
+
+    const nowSolidLevel = makeLevel(["##########", "##########", "##########"]);
+
+    const result = rewind({
+      x: 30,
+      y: 30,
+      size: "large",
+      anchor,
+      destroyed,
+      level: nowSolidLevel,
+      occupancyDestroyed: destroyed,
+    });
+
+    expect(result.triggered).toBe(false);
+    // Player's current state passes straight through, untouched — same
+    // no-op shape as "no anchor armed".
+    expect(result.x).toBe(30);
+    expect(result.y).toBe(30);
+    expect(result.size).toBe("large");
+    expect(result.destroyed).toBe(destroyed);
+  });
+
+  it("omitting level (existing callers) skips the re-check — old behaviour, existing tests untouched", () => {
+    const destroyed: Destroyed = new Set();
+    const anchor: Anchor = { x: 0, y: 0, size: "small" };
+    const result = rewind({ x: 5, y: 5, size: "large", anchor, destroyed });
+    expect(result.triggered).toBe(true);
   });
 });
 

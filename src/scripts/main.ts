@@ -40,7 +40,7 @@ import {
 // why it takes structural parameters instead of importing world.ts (which
 // doesn't exist in this demo wiring either; #5/#6 both replace this file's
 // throwaway state once a real World exists).
-import { arm, rewind, type Anchor } from "../game/rewind";
+import { enterRewindTile, rewind, type ArmedState } from "../game/rewind";
 // Issue #11's browser half of playSfx, imported directly rather than only
 // relying on index.astro's separate <script> tag — see this file's log
 // entry [#10] for why that's safe (ESM module identity is per URL, so the
@@ -229,29 +229,54 @@ function togglePause(): void {
   paused = !paused;
 }
 
-// Issue #6: no anchor stored yet. `arm()` refuses to store one that
-// doesn't fit — see src/game/rewind.ts — so `null` here always means
-// "no machine armed", never "armed somewhere invalid".
-let anchor: Anchor | null = null;
+// Issue #6 / Reviewer findings #2,#3: `armed` carries the anchor *and* the
+// tile it was armed at (src/game/rewind.ts's ArmedState) — tile identity,
+// not the body's sub-pixel position, is what decides "is this the same
+// machine I already armed" in the step() loop below. `null` always means
+// "no machine armed", never "armed somewhere invalid" (arm()/
+// enterRewindTile() refuse rather than store an anchor that doesn't fit).
+let armed: ArmedState | null = null;
 let wasOnRewindTile = false;
 
-// Runs the player back to `anchor`, per plan.md's brief ("re-entering it,
-// or the contextual rewind control, returns the player to that anchor").
-// `rewind()` itself never touches `demoWorld.destroyed` — see rewind.ts's file
-// header for why that's structural, not just "it doesn't currently do
-// it". A no-op (no anchor armed) is silently ignored, same convention as
-// every other no-op in this file (requestSizeChange, etc).
+// Runs the player back to the armed anchor, per plan.md's brief
+// ("re-entering it, or the contextual rewind control, returns the player
+// to that anchor"). `rewind()` itself never touches `demoWorld.destroyed`
+// — see rewind.ts's file header for why that's structural, not just "it
+// doesn't currently do it". A no-op (no anchor armed, or finding #4's
+// belt-and-braces occupancy re-check refusing) is silently ignored, same
+// convention as every other no-op in this file (requestSizeChange, etc).
 function triggerRewind(): void {
   const result = rewind({
     x: playerBody.x,
     y: playerBody.y,
     size: sizeState.size,
-    anchor,
+    anchor: armed?.anchor ?? null,
     destroyed: demoWorld.destroyed,
+    // Finding #4: re-verify the anchor still fits *now*, not just at
+    // arm-time — see rewind.ts's RewindInput docs for why this is a
+    // separate, concretely-typed pair rather than folding into `destroyed`.
+    level: physicsLevel,
+    occupancyDestroyed: demoWorld.destroyed,
   });
   if (!result.triggered) return;
   const box = HITBOX[result.size];
-  playerBody = { ...playerBody, x: result.x, y: result.y, width: box.width, height: box.height };
+  // Finding #5: the teleport must not carry velocity or ground/coyote/
+  // jump-buffer state through it. Rewinding mid-fall would otherwise drop
+  // the player at the anchor already falling at speed; rewinding while
+  // grounded would hand back a free coyote-time jump the player never
+  // earned at the anchor.
+  playerBody = {
+    ...playerBody,
+    x: result.x,
+    y: result.y,
+    width: box.width,
+    height: box.height,
+    vx: 0,
+    vy: 0,
+    grounded: false,
+    coyoteMs: 0,
+    jumpBufferMs: 0,
+  };
   sizeState = { size: result.size, transition: null };
   player.color = PLAYER_COLOR[result.size];
   playSfx("rewind");
@@ -360,28 +385,41 @@ function step(fixedDeltaMs: number): void {
     }))
     .filter((d) => d.lifeMs > 0);
 
-  // Issue #6: walking into an 'R' machine arms it; re-entering it (having
-  // left and come back) rewinds instead. Edge-triggered on the feet tile
-  // (entered this frame, wasn't on it last frame) so standing on the tile
-  // doesn't re-fire every frame — same shape as the jump/land edge
-  // detection above. `arm()` is the safe-growth-style no-op: a cell the
-  // current hitbox doesn't fit in leaves any existing anchor untouched.
+  // Issue #6: walking into an 'R' machine arms it; re-entering the SAME
+  // tile (having left and come back) rewinds instead. Edge-triggered on
+  // the feet tile (entered this frame, wasn't on it last frame) so
+  // standing on the tile doesn't re-fire every frame — same shape as the
+  // jump/land edge detection above. Reviewer findings #2/#3: "same tile"
+  // is decided by enterRewindTile() on tile coordinates, never by
+  // comparing the body's sub-pixel float position — see rewind.ts's docs
+  // for why that was silently re-arming (and overwriting the anchor's
+  // size) on essentially every re-entry.
   const onRewindTile = feetChar === "R";
   if (onRewindTile && !wasOnRewindTile) {
-    const alreadyArmedHere =
-      anchor !== null &&
-      anchor.x === playerBody.x &&
-      anchor.y === playerBody.y &&
-      anchor.size === sizeState.size;
-    if (alreadyArmedHere) {
+    const result = enterRewindTile(
+      armed,
+      { x: feetTileX, y: feetTileY },
+      playerBody.x,
+      playerBody.y,
+      sizeState.size,
+      physicsLevel,
+      demoWorld.destroyed,
+    );
+    if (result.action === "rewind") {
       triggerRewind();
-    } else {
-      const armed = arm(playerBody.x, playerBody.y, sizeState.size, physicsLevel, demoWorld.destroyed);
-      if (armed) {
-        anchor = armed;
-        inputController.setMachineArmed(true);
-      }
+    } else if (result.action === "armed") {
+      armed = { anchor: result.anchor, tile: result.tile };
+      inputController.setMachineArmed(true);
+      // No-tutorial rule: arming previously gave zero feedback outside
+      // portrait (the only signal, the `↺` control appearing, lives
+      // inside a container that's `display: none` in landscape — see
+      // spec/hidden-display.test.ts). Reuse the mechanic's own "rewind"
+      // cue rather than inventing a new sound (src/game/audio.ts is not
+      // touched by this fix).
+      playSfx("rewind");
     }
+    // "refused" (arm() couldn't fit the current hitbox): no-op, same as
+    // every other safe-growth-style refusal in this file.
   }
   wasOnRewindTile = onRewindTile;
 

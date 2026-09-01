@@ -21,6 +21,15 @@ const MOVE_LEFT_CODES = new Set(["ArrowLeft", "KeyA"]);
 const MOVE_RIGHT_CODES = new Set(["ArrowRight", "KeyD"]);
 const JUMP_CODES = new Set(["Space"]);
 const PAUSE_CODES = new Set(["Escape"]);
+// Finding #1 (Reviewer, crit 5): in landscape, layout.ts returns
+// `controlsRect: null` and main.ts sets `controls.hidden = true`, which
+// styles.css turns into a real `display: none` on `#game-controls` — the
+// on-screen `↺` (rewindControl below) lives inside that container, so it
+// is completely unreachable at that viewport. KeyR is the second,
+// independent trigger path plan.md §6/§10 assumes exists; it is edge-
+// triggered on non-repeat keydown, exactly like Escape/PAUSE_CODES above,
+// not a new mechanism.
+const REWIND_CODES = new Set(["KeyR"]);
 
 /**
  * Pure gate for the contextual rewind control (issue #10 / plan.md: it
@@ -173,6 +182,8 @@ export function createInputController(options: InputControllerOptions): InputCon
       kbJump = true;
     } else if (PAUSE_CODES.has(e.code)) {
       if (!e.repeat) onPauseRequest();
+    } else if (REWIND_CODES.has(e.code)) {
+      if (!e.repeat) onRewindRequest();
     } else {
       return;
     }
