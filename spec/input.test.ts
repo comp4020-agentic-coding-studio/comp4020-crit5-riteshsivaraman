@@ -29,9 +29,15 @@ function setup(overrides: Partial<Parameters<typeof createInputController>[0]> =
   const container = document.createElement("div");
   document.body.appendChild(container);
   containers.push(container);
+  // Tests that don't care about the landscape/hidden-container distinction
+  // (most of them) get the rewind control built into the same container as
+  // everything else — a real caller (main.ts) never does this; see the
+  // "rewind control lives outside the (possibly hidden) controls container"
+  // describe block below for the case that actually matters in production.
   const controller = createInputController({
     keyTarget: window,
     controlsContainer: container,
+    rewindContainer: container,
     document,
     ...overrides,
   });
@@ -185,6 +191,7 @@ describe("input controller: rewind control activation", () => {
     createInputController({
       keyTarget: window,
       controlsContainer: detachedContainer,
+      rewindContainer: detachedContainer,
       document,
       onRewindRequest,
     });
@@ -204,6 +211,57 @@ describe("input controller: rewind control activation", () => {
     window.dispatchEvent(keyEvent("keyup", "KeyR"));
     window.dispatchEvent(keyEvent("keydown", "KeyR"));
     expect(onRewindRequest).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("input controller: rewind control survives #game-controls being landscape-hidden", () => {
+  // This is the case Finding #1 actually broke: a real `#game-controls`
+  // hidden the way main.ts/styles.css hide it in landscape
+  // (`hidden = true` + the `[hidden] { display: none }` CSS rule this test
+  // reproduces directly, since it never loads styles.css) — and the
+  // contextual `#rewind-control` living in a *different* container that
+  // stays visible. Before this fix there was only one container, so this
+  // configuration didn't exist: the control was always inside the one
+  // element that goes `display: none`.
+  function setupLandscapeHidden(): { controller: InputController; rewindContainer: HTMLElement } {
+    const controlsContainer = document.createElement("div");
+    controlsContainer.id = "game-controls";
+    controlsContainer.hidden = true;
+    controlsContainer.style.display = "none"; // the CSS rule spec/hidden-display.test.ts guards
+    document.body.appendChild(controlsContainer);
+    containers.push(controlsContainer);
+
+    const rewindContainer = document.createElement("div");
+    document.body.appendChild(rewindContainer);
+    containers.push(rewindContainer);
+
+    const controller = createInputController({
+      keyTarget: window,
+      controlsContainer,
+      rewindContainer,
+      document,
+    });
+    return { controller, rewindContainer };
+  }
+
+  it("is absent (hidden) before the first arm, present (unhidden) after, entirely within the visible rewindContainer", () => {
+    const { controller, rewindContainer } = setupLandscapeHidden();
+    const rewind = rewindContainer.querySelector<HTMLElement>("#rewind-control");
+
+    expect(rewind).not.toBeNull();
+    expect(rewind!.hidden).toBe(true);
+
+    controller.setMachineArmed(true);
+    expect(rewind!.hidden).toBe(false);
+
+    controller.setMachineArmed(false);
+    expect(rewind!.hidden).toBe(true);
+  });
+
+  it("is never found inside the hidden #game-controls container", () => {
+    setupLandscapeHidden();
+    const hiddenControls = document.getElementById("game-controls")!;
+    expect(hiddenControls.querySelector("#rewind-control")).toBeNull();
   });
 });
 

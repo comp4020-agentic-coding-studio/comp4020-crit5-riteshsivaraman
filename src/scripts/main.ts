@@ -3,7 +3,7 @@
 // the pure layout() and createLoop() from src/game into the actual canvas
 // and window events, and owns nothing that needs to be unit-testable.
 import { createLoop, type Loop } from "../game/loop";
-import { layout, INTERNAL_WIDTH, INTERNAL_HEIGHT, type Layout } from "../game/layout";
+import { layout, rewindControlRect, INTERNAL_WIDTH, INTERNAL_HEIGHT, type Layout } from "../game/layout";
 import { isSolidAt, type Level } from "../game/level";
 // Issue #9: the real four-room progression, replacing issue #14's
 // single-screen fixture (buildDemoRows/demoLevel below no longer exist —
@@ -73,6 +73,19 @@ const canvas = required(
   "#game-canvas",
 );
 const controls = required(document.getElementById("game-controls"), "#game-controls");
+// Issues #10/#12: the contextual rewind control's own anchor, a sibling of
+// `controls` rather than a child of it. `controls` (`#game-controls`) goes
+// `display: none` in landscape (see input.ts's Finding #1 note) — anything
+// appended inside it is unreachable there regardless of its own `.hidden`
+// state, which is exactly the bug this anchor exists to avoid repeating.
+// Created here (not by input.ts) so it already exists for the very first
+// `resize()` call below, same as `canvas`/`controls` themselves; it carries
+// no visual style of its own (`#rewind-control`, appended into it by
+// input.ts, supplies that) — only position, sized by rewindControlRect.
+const rewindAnchor = document.createElement("div");
+rewindAnchor.id = "rewind-anchor";
+rewindAnchor.style.position = "absolute";
+shell.appendChild(rewindAnchor);
 
 canvas.width = INTERNAL_WIDTH;
 canvas.height = INTERNAL_HEIGHT;
@@ -80,7 +93,7 @@ canvas.height = INTERNAL_HEIGHT;
 const ctx = required(canvas.getContext("2d"), "a 2d canvas context");
 ctx.imageSmoothingEnabled = false;
 
-function applyLayout(current: Layout): void {
+function applyLayout(current: Layout, viewportWidth: number, viewportHeight: number): void {
   const { canvasRect, controlsRect } = current;
 
   canvas.style.position = "absolute";
@@ -101,6 +114,16 @@ function applyLayout(current: Layout): void {
     controls.hidden = true;
     shell.style.height = `${document.documentElement.clientHeight}px`;
   }
+
+  // Positioned every layout pass, in both orientations — never gated on
+  // `controlsRect` the way `controls` itself is above. Visibility (armed
+  // or not) is entirely `#rewind-control`'s own `.hidden`, toggled by
+  // `inputController.setMachineArmed`, not this anchor's.
+  const rewindRect = rewindControlRect(current, viewportWidth, viewportHeight);
+  rewindAnchor.style.left = `${rewindRect.x}px`;
+  rewindAnchor.style.top = `${rewindRect.y}px`;
+  rewindAnchor.style.width = `${rewindRect.width}px`;
+  rewindAnchor.style.height = `${rewindRect.height}px`;
 }
 
 function resize(): void {
@@ -115,7 +138,8 @@ function resize(): void {
   // viewport and never needs a vertical scrollbar either.
   const availableHeight =
     document.documentElement.clientHeight - shell.getBoundingClientRect().top;
-  applyLayout(layout(viewportWidth, Math.max(1, Math.floor(availableHeight))));
+  const viewportHeight = Math.max(1, Math.floor(availableHeight));
+  applyLayout(layout(viewportWidth, viewportHeight), viewportWidth, viewportHeight);
 }
 
 window.addEventListener("resize", resize);
@@ -394,6 +418,7 @@ function triggerRewind(): void {
 const inputController = createInputController({
   keyTarget: window,
   controlsContainer: controls,
+  rewindContainer: rewindAnchor,
   document,
   onPauseRequest: togglePause,
   // Issue #10 built the contextual control gated on setMachineArmed;

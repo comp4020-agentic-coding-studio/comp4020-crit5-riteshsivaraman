@@ -1057,3 +1057,49 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   is a draft in Ritesh's voice and is marked as one — the second standing
   prompt is a claim only he can make, and a marker reading an unedited agent
   answer there is worse than a shorter honest one.
+- **Builder-Tester** [#10 #12 #15] — fixed the rewind control's landscape
+  invisibility (human playtest: "not obvious we have rewind available").
+  Root cause: `#rewind-control` lived inside `#game-controls`, which
+  main.ts/styles.css make `display: none` in landscape — `setMachineArmed`
+  worked, the element just had no visible container to render into.
+  Fix: `input.ts`'s `createInputController` now takes a required, separate
+  `rewindContainer` (distinct from `controlsContainer`), so the control has
+  its own DOM home that is never hidden for that reason; `layout.ts` gains
+  a pure `rewindControlRect` (canvasRect/controlsRect in, a placement rect
+  out — portrait: inside the controls band; landscape: whichever letterbox
+  margin has room, falling back to the canvas's own corner if the canvas
+  fills the viewport exactly) so main.ts never hardcodes a position; main.ts
+  creates a `rewindAnchor` div before the first `resize()` call and passes
+  it through. `shouldShowRewindControl` untouched — still the only gate,
+  still starts false. No instructional text added anywhere; `aria-label`
+  stays a name ("Rewind"), matching the existing pads.
+  New sensors, both proved red-then-green by hand: `spec/input.test.ts`
+  gained a describe block that builds a real `#game-controls` with
+  `hidden=true` + `display:none` (reproducing the landscape case exactly,
+  not just a detached container) and a separate visible `rewindContainer`,
+  asserting the control is absent from the former and present/gated
+  correctly in the latter — reverting the two-container split made both
+  new tests fail for the right reason (`querySelector` returned null /
+  found it in the wrong container). `spec/layout.test.ts` gained four
+  `rewindControlRect` cases (390x844 portrait, two landscape letterbox
+  variants, and 1920x1080's exact-fill edge case) asserting the returned
+  rect never overlaps `canvasRect`; sabotaging the "beside canvas" branch
+  to place the rect inside the canvas instead made that case fail with the
+  overlap assertion, confirming the check bites.
+  Scope: did not touch rewind.ts/world.ts/rooms/resolveFragileContact, and
+  did not build issue #15's ghost/afterimage — that's still a separate
+  decision. My honest read: the control alone teaches "there is a button
+  called Rewind," not "walking into the machine a second time returns you
+  here" — without #15's arming ghost (or some other cue at the machine
+  itself), a player who never notices the corner glyph, or notices it but
+  doesn't connect it to the machine two rooms back, still won't learn the
+  mechanic from this fix alone. That's a design call for the orchestrator,
+  not something I expanded scope to fix.
+  No browser was available this session either — positioning is asserted
+  by `rewindControlRect`'s pure math (both required viewports plus two
+  extra letterbox cases), not by looking at the rendered page; Ritesh
+  should check the actual corner placement looks right, especially the
+  1920x1080 exact-fill fallback, which is a real overlap-with-canvas case
+  by construction, not just an untested edge.
+  `pnpm check` green (typecheck + build + vitest), 237 tests;
+  `pnpm check:evidence` still green.

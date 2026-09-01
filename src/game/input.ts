@@ -24,11 +24,14 @@ const PAUSE_CODES = new Set(["Escape"]);
 // Finding #1 (Reviewer, crit 5): in landscape, layout.ts returns
 // `controlsRect: null` and main.ts sets `controls.hidden = true`, which
 // styles.css turns into a real `display: none` on `#game-controls` — the
-// on-screen `↺` (rewindControl below) lives inside that container, so it
-// is completely unreachable at that viewport. KeyR is the second,
-// independent trigger path plan.md §6/§10 assumes exists; it is edge-
-// triggered on non-repeat keydown, exactly like Escape/PAUSE_CODES above,
-// not a new mechanism.
+// on-screen `↺` (rewindControl below) used to live inside that container,
+// so it was completely unreachable at that viewport (issues #10/#12 fix:
+// see `rewindContainer` below — it now lives in a container main.ts renders
+// outside `#game-controls`, positioned via layout.ts's rewindControlRect,
+// so it survives `#game-controls` being hidden in landscape). KeyR is the
+// second, independent trigger path plan.md §6/§10 assumes exists; it is
+// edge-triggered on non-repeat keydown, exactly like Escape/PAUSE_CODES
+// above, not a new mechanism.
 const REWIND_CODES = new Set(["KeyR"]);
 
 /**
@@ -59,10 +62,19 @@ export type InputControllerOptions = {
   /** Keyboard listener target — `window` in the real app, any EventTarget
    * that dispatches KeyboardEvents in tests. */
   keyTarget: EventTarget;
-  /** Container the on-screen pads/buttons are built into — normally
+  /** Container the movement/jump/pause pads are built into — normally
    * `#game-controls`. Visible or not is main.ts's/layout's call (portrait
    * vs landscape); this module only ever adds children to it. */
   controlsContainer: HTMLElement;
+  /** Container the contextual rewind control (`#rewind-control`) is built
+   * into. Deliberately a *separate* element from `controlsContainer`: that
+   * container is `#game-controls`, which main.ts/layout.ts make
+   * `display: none` in landscape (Finding #1 above) — the rewind control
+   * must stay reachable in both orientations once armed, so it needs a
+   * container that is never hidden for that reason. Required (not
+   * defaulted to controlsContainer) precisely so nothing can silently
+   * regress into the old broken-in-landscape wiring by omitting it. */
+  rewindContainer: HTMLElement;
   /** Used to create the pad/button elements. */
   document: Document;
   /** Fired once per Escape keydown or on-screen pause-control activation
@@ -158,7 +170,7 @@ function bindButton(el: HTMLElement, onActivate: () => void): () => void {
 }
 
 export function createInputController(options: InputControllerOptions): InputController {
-  const { keyTarget, controlsContainer, document: doc } = options;
+  const { keyTarget, controlsContainer, rewindContainer, document: doc } = options;
   const onPauseRequest = options.onPauseRequest ?? ((): void => {});
   const onRewindRequest = options.onRewindRequest ?? ((): void => {});
 
@@ -222,7 +234,12 @@ export function createInputController(options: InputControllerOptions): InputCon
   // setMachineArmed(true) ever reveals it.
   rewindControl.hidden = true;
 
-  controlsContainer.append(moveGroup, pauseControl, padJump, rewindControl);
+  // Movement/jump/pause stay in controlsContainer (#game-controls,
+  // portrait-only touch pads); rewindControl goes into its own container so
+  // it survives #game-controls being display:none in landscape — see
+  // rewindContainer's docs above and Finding #1.
+  controlsContainer.append(moveGroup, pauseControl, padJump);
+  rewindContainer.append(rewindControl);
 
   const unbindLeft = bindPad(
     padLeft,

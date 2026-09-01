@@ -69,3 +69,75 @@ export function layout(viewportWidth: number, viewportHeight: number): Layout {
     controlsRect: { x: 0, y: canvasHeight, width: viewportWidth, height: controlsHeight },
   };
 }
+
+// Size/margin for the contextual rewind control (issue #10/#12's fix: the
+// control used to live inside #game-controls, which this same module makes
+// `display:none` in landscape — see input.ts's Finding #1 note). 64px
+// matches plan.md §3's touch-target minimum, reused here even though this
+// control is not one of the movement pads.
+const REWIND_CONTROL_SIZE = 64;
+const REWIND_CONTROL_MARGIN = 12;
+
+/**
+ * Pure placement for the rewind control, independent of the touch-pad band:
+ * it must be reachable in *both* orientations (main.ts renders it outside
+ * `controlsRect`'s container entirely), so it needs its own rect rather than
+ * reusing controlsRect's. Takes the already-computed Layout plus the same
+ * viewport numbers layout() was called with, so it never has to touch the
+ * DOM to find out where the letterbox margins are.
+ *
+ * - Portrait (`controlsRect` present): anchored inside the controls band,
+ *   clear of the canvas above it.
+ * - Landscape (`controlsRect` null): anchored in whichever letterbox margin
+ *   around the centred canvas has room (below it, then beside it), so it
+ *   never sits over the rendered game view. If the canvas happens to fill
+ *   the viewport exactly (no margin either side), it falls back to the
+ *   canvas's own top-right corner — a HUD-style overlay, not ideal, but
+ *   still never over the `<h1>` above the shell, which is outside this
+ *   coordinate space entirely.
+ */
+export function rewindControlRect(
+  current: Layout,
+  viewportWidth: number,
+  viewportHeight: number,
+): Rect {
+  const { canvasRect, controlsRect } = current;
+  const size = REWIND_CONTROL_SIZE;
+  const margin = REWIND_CONTROL_MARGIN;
+
+  if (controlsRect) {
+    return {
+      x: controlsRect.x + controlsRect.width - size - margin,
+      y: controlsRect.y + margin,
+      width: size,
+      height: size,
+    };
+  }
+
+  const bottomMargin = viewportHeight - (canvasRect.y + canvasRect.height);
+  const rightMargin = viewportWidth - (canvasRect.x + canvasRect.width);
+  const needed = size + margin * 2;
+
+  if (bottomMargin >= needed) {
+    return {
+      x: viewportWidth - size - margin,
+      y: canvasRect.y + canvasRect.height + margin,
+      width: size,
+      height: size,
+    };
+  }
+  if (rightMargin >= needed) {
+    return {
+      x: canvasRect.x + canvasRect.width + margin,
+      y: margin,
+      width: size,
+      height: size,
+    };
+  }
+  return {
+    x: canvasRect.x + canvasRect.width - size - margin,
+    y: canvasRect.y + margin,
+    width: size,
+    height: size,
+  };
+}
