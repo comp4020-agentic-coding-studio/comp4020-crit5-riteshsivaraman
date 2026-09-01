@@ -117,6 +117,34 @@ shielded by whichever neighbouring column survives. The room the crit is judged
 on was authored against a machine-checked oracle instead of intuition, and the
 solver asserts `dead === flagged` exactly: 64 of 64, no mismatch either way.
 
+## What I cut, and what is still missing
+
+Two things were cut deliberately rather than quietly.
+
+**The rewind's arming ghost and rewind effect (issue 15).** `plan.md` §6/§9
+call for a violet pulse at the machine, a stored ghost of you at the anchor,
+and a desaturated reversed sweep on the rewind itself. They were never in
+issue 6's Done-when list, so nobody built them, and by the time that surfaced
+the week's budget was at $109 of $120. The mechanic therefore has an arming
+sound and a contextual `↺` control and nothing else. That is a real gap in the
+no-tutorial rule, not a cosmetic one: a player who walks past the machine gets
+no signal that anything happened. It is filed as
+[issue 15](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/issues/15) with the diagnosis in it.
+
+**Room 3's residual dead states.** Roofing the approach lane
+([`6277865`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/6277865)) cut them from 156 of 394 reachable states to
+50 of 267 and eliminated the "armed while already large" class entirely. The
+50 that remain are a *solver artefact*: its jump edge lands on a destination
+tile without modelling headroom at the origin, so it still believes a hop over
+the machine exists that real collision forbids. Rather than trust either layer,
+the guarantee is asserted where it is decidable — `spec/room3-approach.test.ts`
+drives `stepBody` itself and proves a body on that lane cannot rise out of it,
+verified by deleting the ceiling and watching it go red.
+
+The general rule I would keep: when one layer cannot decide something, assert
+it at the layer that can, and say so — rather than lowering the first layer's
+standard until it agrees.
+
 ## Before you ship
 
 `pnpm check` runs the suite; `pnpm check:dispatch` gates a handoff to a
