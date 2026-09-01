@@ -366,3 +366,74 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   distinct terrain, and the console is clean, per the issue's Done-when
   bullet 5.
   `pnpm check` green, 111 tests (up from 105 — 6 new in `spec/render.test.ts`).
+
+- **Builder-Tester** [#10 #4 #5 #6 #7] — built `src/game/input.ts`
+  (`createInputController`, `shouldShowRewindControl`) and
+  `spec/input.test.ts` (14 tests). Keyboard (A/D/Arrows, Space, Escape) and
+  on-screen touch pads (`#pad-left`, `#pad-right`, `#pad-jump`, built by
+  this module into `#game-controls`, not authored in `index.astro`) OR into
+  the same three booleans, so `stepBody`'s `InputState` (re-exported as-is
+  from `physics.ts`, not redefined) never carries any hint of source. Pause
+  and the future rewind action are deliberately *not* part of `InputState`
+  — both are one-shot activations, not continuous per-frame state — and are
+  delivered as `onPauseRequest`/`onRewindRequest` callbacks fired at the
+  moment of the keydown/pointerdown instead, with `Escape`'s OS key-repeat
+  filtered out (`event.repeat`) so a held Escape doesn't rapid-fire pause.
+  Touch pads use Pointer Events (not `click`) plus `touch-action: none` /
+  `user-select: none` set **inline** (not only via CSS) so the no-scroll/
+  no-zoom/no-select/no-300ms-delayed-click contract is verifiable without
+  loading `styles.css`; `touchstart`/`touchmove`/`contextmenu` are also
+  `preventDefault()`-ed as belt-and-braces for engines that still schedule
+  those gestures under a Pointer Event stream. Multiple simultaneous
+  pointers on one pad are tracked so it only releases once every pointer
+  has lifted.
+  **The rewind-control gate**: `shouldShowRewindControl(hasArmedAMachine)`
+  is a standalone pure function (no controller, no DOM) so both states are
+  covered directly in `spec/input.test.ts` with no browser API involved.
+  `createInputController` builds `#rewind-control` `hidden` from
+  construction — before `setMachineArmed` is ever called — so "never shown
+  yet" is the actual default, not just the test's assumption; issue #6 is
+  the only thing that should ever call `setMachineArmed(true)`. Do not
+  invent rewind behaviour beyond this gate — no rewind mechanic exists.
+  **SFX ownership, so this doesn't get orphaned a second time (`render.ts`
+  was, until #14)**: this issue wires `jump` and `land` only, in
+  `src/scripts/main.ts`'s `step()`, right where `stepBody`'s returned Body
+  is compared against the previous frame's — a jump impulse is the only way
+  `vy` becomes exactly `-JUMP_SPEED` (gravity only ever adds to `vy`), and a
+  landing is exactly a `grounded: false -> true` transition, so both are
+  detected without duplicating `stepBody`'s internal edge logic or touching
+  `physics.ts` (which must stay pure and can't call `playSfx` itself).
+  `playSfx` is imported directly from `src/scripts/audio.ts` into
+  `main.ts` — confirmed via `dist/_astro/*.js` after a real build that this
+  does **not** double-instantiate the audio engine: Vite dedupes the shared
+  `audio.ts` module into one chunk imported by both `main.ts`'s and
+  `index.astro`'s separate `<script>` entry points. **Every other SFX name
+  stays unwired and belongs to the issue that owns the mechanic it plays
+  for**: grow/shrink to #4, destroy/fragileImpact to #5, rewind to #6, win
+  to #7. None of those should assume `main.ts`'s throwaway demo room is
+  where their call belongs either — #9's real rooms are.
+  Also wired: `main.ts`'s `step()` now actually drives `playerBody` via
+  `createBody`/`stepBody` against a `PhysicsLevel` adapter over the
+  existing demo level (`isSolidAt` from `level.ts`), so the player visibly
+  moves and jumps in the throwaway room for the first time — unblocks the
+  "does the jump feel fair" and "are the SFX distinct" human checks that
+  were stuck behind there being no input at all. A bare `paused` boolean in
+  `main.ts` (toggled by `onPauseRequest`) skips `loop.advance` while true;
+  no pause *screen* was built (out of scope, no rules.ts to hang one off).
+  **Real jsdom gotcha found and worked around, not by weakening the test**:
+  the first cut of `spec/input.test.ts` left each test's `#game-controls`
+  container attached to `document.body` — with two elements sharing an id
+  (e.g. `#rewind-control`) anywhere in the document, jsdom's `querySelector`
+  id fast-path returned `null` for a *freshly created* element with that id
+  even though `outerHTML` showed it was really there. Confirmed by dumping
+  `outerHTML` alongside the failing query before concluding it was a jsdom
+  quirk, not a bug in `input.ts`. Fixed by tearing each test's container out
+  of the document in `afterEach`, not by relaxing what the test checks.
+  **Browser-dependent criteria left unverified**: `list_connected_browsers`
+  returned `[]` again this session. Not verified in a real browser: touch
+  emulation at 390x844 (no 300ms delayed click, no scroll/zoom/select in
+  practice, pad hit targets actually feel like ≥64px), console/network
+  clean on a real load, and the still-open "does the jump feel fair" human
+  check from #3's log entry (now unblocked, but nobody has played it).
+  Ritesh's next real-browser pass should cover all of these.
+  `pnpm check` green, 125 tests (up from 111 — 14 new in `spec/input.test.ts`).

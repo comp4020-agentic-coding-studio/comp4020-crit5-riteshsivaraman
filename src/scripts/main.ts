@@ -4,7 +4,7 @@
 // and window events, and owns nothing that needs to be unit-testable.
 import { createLoop, type Loop } from "../game/loop";
 import { layout, INTERNAL_WIDTH, INTERNAL_HEIGHT, type Layout } from "../game/layout";
-import { parseLevel } from "../game/level";
+import { parseLevel, isSolidAt } from "../game/level";
 import { TILE, ROOM_WIDTH_TILES, ROOM_HEIGHT_TILES } from "../game/tiles";
 import {
   bakeAtlas,
@@ -13,6 +13,14 @@ import {
   type RenderCtx,
   type PlayerRect,
 } from "../game/render";
+import { createBody, stepBody, JUMP_SPEED, type Body, type PhysicsLevel } from "../game/physics";
+import { createInputController } from "../game/input";
+// Issue #11's browser half of playSfx, imported directly rather than only
+// relying on index.astro's separate <script> tag — see this file's log
+// entry [#10] for why that's safe (ESM module identity is per URL, so the
+// audio module's gesture-unlock/engine setup still only runs once even
+// though two entry points now reference it).
+import { playSfx } from "./audio";
 
 function required<T>(el: T | null, what: string): T {
   if (!el) throw new Error(`main.ts: expected ${what} in the page`);
@@ -137,10 +145,61 @@ const player: PlayerRect = {
   height: 16,
 };
 
-// Rules/physics/world land in later issues; nothing to simulate yet, so the
-// step function stays empty and the player rect above is static.
-function step(_fixedDeltaMs: number): void {
-  // Nothing to simulate yet — see the comment above.
+// world.ts (#6) doesn't exist yet, so there is no real reducer to step —
+// but issue #10 needs the player to actually move to unblock the "does the
+// jump feel fair" human check, so physics.ts's stepBody is driven directly
+// against the demo level here. #4/#6's Builders replace this with a real
+// World once size/destruction/rewind exist; nothing here is meant to
+// survive that.
+const physicsLevel: PhysicsLevel = {
+  tileSize: TILE,
+  widthPx: ROOM_WIDTH_TILES * TILE,
+  heightPx: ROOM_HEIGHT_TILES * TILE,
+  isSolidTile: (tileX, tileY) => isSolidAt(demoLevel, tileX, tileY, demoDestroyed),
+};
+let playerBody: Body = createBody(player.x, player.y, player.width, player.height);
+
+let paused = false;
+function togglePause(): void {
+  paused = !paused;
+}
+
+// Issue #10: unified keyboard + touch input. Neither physics.ts nor this
+// step function below can tell A/Left from a finger on #pad-left — both
+// arrive already OR'd into the same InputState (src/game/input.ts).
+const inputController = createInputController({
+  keyTarget: window,
+  controlsContainer: controls,
+  document,
+  onPauseRequest: togglePause,
+});
+
+function step(fixedDeltaMs: number): void {
+  if (paused) return;
+
+  const input = inputController.getState();
+  const wasGrounded = playerBody.grounded;
+  const prevVy = playerBody.vy;
+
+  playerBody = stepBody(playerBody, input, physicsLevel, demoDestroyed, fixedDeltaMs);
+
+  // Jump/land are "decided" right here, the instant stepBody's new Body
+  // comes back — not inside physics.ts (which must stay pure, plan.md §5)
+  // and not guessed at from outside via a second copy of stepBody's jump
+  // logic. A jump impulse is the *only* way vy can become exactly
+  // -JUMP_SPEED (gravity only ever adds to vy), so comparing against the
+  // previous frame's vy catches exactly the step a jump fires, no edge
+  // detection duplicated from physics.ts. A landing is exactly a
+  // grounded:false -> grounded:true transition.
+  if (playerBody.vy === -JUMP_SPEED && prevVy !== -JUMP_SPEED) {
+    playSfx("jump");
+  }
+  if (!wasGrounded && playerBody.grounded) {
+    playSfx("land");
+  }
+
+  player.x = playerBody.x;
+  player.y = playerBody.y;
 }
 
 function render(): void {

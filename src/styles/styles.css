@@ -50,5 +50,42 @@ main h1 {
 }
 
 #game-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  padding: 0.75rem;
   background: #1c1c22;
+}
+
+/* Touch pads (src/game/input.ts). touch-action/user-select are also set
+   inline by input.ts itself, so the no-scroll/no-zoom/no-select contract
+   holds even if this stylesheet fails to load --- this class only adds the
+   visual treatment. */
+.input-pad-group {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.input-pad {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 12px;
+  background: #2a2a33;
+  color: #f5f0e6;
+  font-size: 1.5rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.input-pad--active {
+  background: #454554;
+}
+
+#rewind-control[hidden] {
+  display: none;
 }
