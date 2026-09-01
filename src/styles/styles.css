@@ -1,16 +1,47 @@
 body {
   margin: 0;
-  padding: 2rem;
   font-family: system-ui, sans-serif;
   line-height: 1.6;
   color: #1a1a1a;
+  overflow-x: hidden;
+}
+
+header {
+  padding: 0.5rem 1rem;
+}
+
+nav a {
+  color: #0b5fff;
 }
 
 main {
-  max-width: 40rem;
-  margin: 0 auto;
+  margin: 0;
 }
 
-a {
-  color: #0b5fff;
+main h1 {
+  margin: 0;
+  padding: 0.25rem 1rem 0.75rem;
+  font-size: 1.5rem;
+  background: #101014;
+  color: #f5f0e6;
 }
+
+#game-shell {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+#game-canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  background: #101014;
+}
+
+#game-controls {
+  background: #1c1c22;
+}
+

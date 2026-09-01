@@ -92,3 +92,50 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   Rejected a pre-commit hook that blocks commits missing a log entry: it would
   fire on every typo fix, and a hook people learn to `--no-verify` past is
   worse than no hook.
+- **Builder-Tester** [#2 #7 #9 #10 #12] — built issue 1's shell: `src/game/layout.ts`
+  (pure, `layout(w,h) -> {scale, canvasRect, controlsRect}`) and `src/game/loop.ts`
+  (pure fixed-60Hz accumulator, single division + epsilon rather than repeated
+  subtraction so float drift can't silently drop a step). `main.ts` is the only
+  wiring: creates the 320x180 canvas, sets `imageSmoothingEnabled = false`,
+  drives `requestAnimationFrame` + `performance.now()`, and lays out `#game-shell`
+  / `#game-canvas` / `#game-controls` from `layout()`. Portrait's controls band
+  is an empty styled div for now — issue 10 fills in the actual pads; issue 9's
+  rooms and issue 2's render/tileset both render into the same canvas/step hook
+  this main.ts already drives. `<h1>Remnant</h1>` is the visible title-card text
+  now (was the template placeholder) — issue 12 still owns the head block
+  (title/description/card) and the no-instructions sensor, so don't re-touch
+  the `<head>` or README for that; just know the h1 text is claimed.
+- **Builder-Tester** [#1 #9 #10] — resize computes available height as
+  `window.innerHeight - shell.getBoundingClientRect().top`, not the raw window
+  height, so the header/h1 above the canvas doesn't push the page into a
+  vertical scrollbar on short viewports (e.g. 390x844 minus the header). Any
+  future change to header/h1 height needs no code change here, but a much
+  taller header would eat into the ≥200px controls-band floor `layout.ts`
+  guarantees — worth a glance if #12's head rewrite changes header height.
+- **Builder-Tester** [#1] — blocked on the browser-driving step: the
+  claude-in-chrome extension reported "not connected" for the whole session
+  (`list_connected_browsers` returned `[]` even after opening Chrome to the dev
+  URL), and this sandbox has no screen-recording permission either
+  (`screencapture` fails with "could not create image from display"), so no
+  visual/console check at 1920x1080 or 390x844 was possible this session.
+  Verified what was possible without a browser instead: `pnpm check` green
+  (typecheck + build + all 46 vitest cases including the new loop/layout/
+  pure-modules specs), and `curl`'d the dev server's `/` and `/src/scripts/
+  main.ts` for 200s with the expected `<canvas id="game-canvas">` and single
+  `<h1>Remnant</h1>` in the served HTML, with no errors in the `astro dev`
+  log. The next session with a working browser connection should still do the
+  real visual/console pass at both viewports before trusting this closed.
+- **Builder-Tester** [#1] — `spec/pure-modules.test.ts` was vacuously green on
+  first pass: its allow-list contained every `.ts` file actually present in
+  `src/game` (`layout.ts`, `loop.ts`) plus `main.ts`, which isn't even in that
+  directory, so the sensor asserted on zero files. Fixed by narrowing the
+  allow-list to `render.ts`/`input.ts` only — the modules not yet built that
+  will genuinely need the DOM — since `loop.ts` and `layout.ts` are pure by
+  construction (that's *why* they're importable into vitest with no canvas)
+  and should be checked like any other pure module, not exempted because
+  plan.md's prose lists them as browser-allowed. Confirmed red for the right
+  reason first: temporarily added `document.title` to `loop.ts`, watched the
+  sensor fail naming `loop.ts` specifically, then reverted before fixing the
+  allow-list. Also stripped `//` line comments before matching, so a comment
+  merely mentioning a browser API doesn't trip it (block comments and string
+  contents are left alone — a parser is more sensor than this needs).
