@@ -159,3 +159,58 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   chrome with default blue links above a black canvas, and an h1 band
   identical in colour to the canvas, both read as an unfinished template —
   cosmetic only, no game rules touched.
+- **Builder-Tester** [#11] — `spec/pure-modules.test.ts`'s allow-list is
+  `render.ts`/`input.ts` only, and audio is inherently browser-facing
+  (`AudioContext`), so `src/game/audio.ts` would trip it. Resolved by *not*
+  touching the sensor: split audio into a pure graph builder
+  (`src/game/audio.ts`, `createSfxEngine(ctx, muted?)` — takes any
+  AudioContext-shaped object and only calls `ctx.createOscillator`/
+  `createGain`/etc., never `window`/`document`/`localStorage`) and a browser
+  wiring file outside `src/game` (`src/scripts/audio.ts`, sibling to
+  `main.ts`, loaded as its own `<script>` tag in `index.astro` so this issue
+  never touches `main.ts`) that does the actual `new AudioContext()`, the
+  first-gesture unlock, and `localStorage` mute persistence. Confirmed the
+  sensor still goes red for the right reason: temporarily appended
+  `export const _leak = document.title;` to `audio.ts`, watched
+  `pure-modules.test.ts` fail naming `audio.ts` specifically ("audio.ts
+  matched a browser API pattern"), then reverted before shipping. Chose this
+  over extending the allow-list because the split needed zero weakening of
+  the sensor and stays consistent with why `loop.ts`/`layout.ts` are pure —
+  the browser-facing half of any subsystem belongs in `src/scripts`, not in
+  an exemption list.
+- **Builder-Tester** [#11] — the autoplay-gesture requirement without an
+  on-screen instruction: `src/scripts/audio.ts` registers one-shot
+  `pointerdown`/`keydown`/`touchstart` listeners on `window` at import time
+  and only constructs the real `AudioContext` inside the handler, so the
+  very first interaction a player makes to actually play the game is the
+  same gesture that unlocks sound — no "click to enable audio" prompt, no
+  text at all. `AudioContext` construction and `ctx.resume()` are both
+  wrapped in try/catch; a missing/blocked/throwing context leaves `engine`
+  `null` and `playSfx()` becomes a permanent no-op, per the issue's "failing
+  audio must never break the game".
+- **Builder-Tester** [#11] — mute is a single icon-only `<button
+  id="mute-toggle">` added to `index.astro`'s existing `<nav>` (🔊/🔇, no
+  label text), state persisted at `localStorage["remnant.audio.muted"]`.
+  Treated as ordinary page chrome (same category as the nav's "Home" link),
+  not a mechanic explanation, so it doesn't trip the no-instructions sensor
+  issue #12 owns — flagging this explicitly for whoever builds #12's sensor,
+  in case it scans nav text and needs to allow a bare emoji glyph.
+  Overlapping-trigger clipping is handled two ways in `createSfxEngine`: a
+  60 ms same-name retrigger guard (`RETRIGGER_GUARD_S`), and every voice
+  fanning into one `DynamicsCompressorNode` before `ctx.destination` so even
+  distinct simultaneous sounds (e.g. `destroy`'s crack + a `break`) get
+  summed down rather than clipped. `spec/audio.test.ts` builds the whole
+  graph against a hand-written `FakeAudioContext` stub (no jsdom `Audio*`
+  needed) and covers: all eight SFX build real graph nodes without throwing,
+  mute suppresses synthesis entirely, same-sound retrigger within the guard
+  window is dropped while one after it is let through, and a throwing
+  `ctx.createOscillator` is swallowed rather than propagated. Not yet wired:
+  no gameplay code exists in this worktree to call `playSfx()` from (physics/
+  world/rooms land in issues #3–#9), so `src/scripts/audio.ts` exports
+  `playSfx`/`isMuted`/`setMuted` for those to import later — nothing calls
+  `playSfx` yet outside the mute button's own feedback path. Audibility is
+  unverified: no browser was connected this session
+  (`list_connected_browsers` returned `[]`), so nothing was actually heard —
+  Ritesh's next real-browser pass should confirm the eight SFX sound
+  distinct and the rewind sweep in particular reads as unmistakable per the
+  issue's requirement.
