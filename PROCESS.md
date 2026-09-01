@@ -1,70 +1,123 @@
 # Process overview
 
-<!-- TEMPLATE: this file is a shape to fill in, not a form. Replace everything
-     in it with your own overview, and delete this comment — `pnpm
-     check:evidence` will remind you if it's still here. -->
-
-A reading-guide to how the work came together --- a map to your process, not an
-essay about it. Markers read this file and follow its citations; they don't
-trawl the repo for evidence you didn't point at, so if a moment mattered, cite
-it.
-
-This file is the shape; the course site's
-[assessment page](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#what-you-submit)
-is the requirement, and its
-[word counts](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#word-counts)
-cover every deliverable.
+A reading-guide to how *Remnant* came together over one night, and to the four
+moments where a correction landed in the harness rather than in a retry.
 
 ## What I built
 
-One paragraph: the thing, and the idea behind it.
+A small browser game about a creature that changes size inside an abandoned
+facility. Two mechanics — growing/shrinking, and a rewind machine that returns
+*you* but not the world — that interact to produce the only loss in the game:
+destruction is permanent, so a wrong break can strand you, and rewinding does
+not undo it. No tutorial, no text, no HUD. Four rooms, about three minutes.
+The environment is the tutorial, which is why the tileset is authored as code
+and checked for legibility rather than eyeballed.
+
+I ran it as three roles — an Opus Architect once, Sonnet Builder-Testers one
+per issue, and a single Opus Reviewer — with an orchestrator session holding
+the plan, dispatching work, and verifying every claim before merging.
 
 ## The moments that mattered
 
-Three or four for an assignment; fewer is fine for a weekly prototype. Keep the
-list short so each moment has room to do all four jobs:
+### 1. The gate between planning and building
 
-1. **what happened** --- the problem, or the thing that went wrong
-2. **what you did instead of the obvious thing** --- the call you made, and why
-   it beat the obvious one
-3. **how you knew it was right** --- the check you ran, the viewport you looked
-   at, what you read before accepting the diff
-4. **the citation** --- a commit or commit range, a `CLAUDE.md` change, a check
-   that went from red to green, a prompt paired with the commit it produced
+The Architect produced [`plan.md`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/blob/main/plan.md) and thirteen
+test-shaped issues, and the obvious next move was to hand issue 1 to a Builder.
+Four things would have gone wrong at once: `plan.md` was untracked, so every
+issue's opening line — "read plan.md" — pointed at a file that existed in one
+working copy; the staged stack migration was uncommitted, so a Builder's first
+commit would have absorbed it and "closes #1" would have cited an unreadable
+diff; twelve of thirteen issue bodies carried backslash-escaped backticks from
+the shell quoting that created them; and the agent log was unread.
 
-Jobs 2 and 3 are the ones the repo can't tell a reader on its own, so they're
-where the marks are. The strongest moments are the ones where a correction
-landed in the **harness** --- the standards and checks your work has to satisfy
---- rather than in a retry: a rule added to `CLAUDE.md`, a check wired up, an
-attempt thrown away. Retrying until it passes is the routine case, and changing
-what the work runs against is the skilled one.
+Instead of starting the Builder and letting it discover the mess, I added a
+standing pre-dispatch check. The cost asymmetry decided it: each is a
+two-minute fix before dispatch and a `/clear`-ed session's worth of confusion
+after, because a Builder that hits a missing `plan.md` improvises rather than
+stopping.
 
-Cite each moment as a link whose text is the commit hash or range and whose
-target is this repo's commit or compare URL, so a reader clicks straight to the
-evidence:
+That became [`scripts/check-dispatch.ts`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/blob/main/scripts/check-dispatch.ts)
+in [`ed0a23d`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/ed0a23d) — clean tree, `plan.md` tracked, log-lag by
+git ancestry rather than mtime, issue bodies checked *as stored* rather than as
+rendered. The part I'd defend hardest is the read side: log entries carry
+`[#n]` tags and `pnpm check:dispatch <n>` **prints** the matching entries to
+paste into that Builder's prompt. A log that is written but never consulted
+fails silently, and no sensor can catch that — so the fix was to deliver it
+rather than trust a session to go looking.
 
-- one commit: [`a1b2c3d`](https://github.com/YOUR-ORG/YOUR-REPO/commit/a1b2c3d)
-- a range:
-  [`a1b2c3d...e4f5a6b`](https://github.com/YOUR-ORG/YOUR-REPO/compare/a1b2c3d...e4f5a6b)
+### 2. Four checks that passed while measuring nothing
 
-To pair a prompt with the commit it produced, quote the prompt (curated, not a
-full transcript) next to the citation:
+The recurring failure of the night was never a red test. It was green checks
+that measured nothing, and none was found by running the suite:
 
-> the prompt, verbatim
+- `spec/pure-modules.test.ts` allow-listed every file that existed, so it
+  asserted on **zero** files and passed. Found by asking which files it
+  actually scanned, not by running it. Fixed in
+  [`35bffd3`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/35bffd3).
+- `body { overflow-x: hidden }` made issue 1's "no horizontal scroll"
+  criterion unfalsifiable — the mask and the criterion were written in the same
+  session by the same agent. A real overflow was hiding behind it, caused by
+  sizing the shell from `window.innerWidth` (which includes the scrollbar).
+  [`49ae8c3`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/49ae8c3).
+- `controls.hidden = true` was correct, tested, and did nothing: an
+  id-selector `display: flex` outranks the UA `[hidden]` rule. Found by
+  looking at the running game on a phone, not by a test.
+  [`bc2d9de`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/bc2d9de).
+- Running Builders in parallel git worktrees put real checkouts *inside* the
+  repo, so vitest collected every worktree's copy of every spec: **304**
+  "passing" tests spanning unmerged branches. The isolation that enabled
+  parallelism silently broke the suite that validated it.
+  [`5396205`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/5396205).
 
-Screenshots are welcome where one carries the verification better than a
-sentence does. Commit the file to this repo and link it with a **relative**
-path, which is what makes it render on GitHub: `![alt text](docs/before.png)`.
-Images don't count towards the word count and don't replace the citation.
+Each fix shipped as a sensor that generalises past its own bug rather than a
+patch: `spec/no-scroll-mask.test.ts` forbids suppressing the observable
+instead of satisfying the condition, and `spec/hidden-display.test.ts` greps
+`src/` for every id the code toggles via `.hidden` and requires a
+`[hidden]`-guarded rule — so it already covers elements nobody has written yet.
+
+The habit that came out of this: after a Builder reports green, I mutate the
+code and check the test goes red **for the right reason**. Every acceptance in
+this repo was verified that way — including with a different field than the
+Builder used, so the proof wasn't just a replay of theirs.
+
+### 3. The Reviewer found the game uncompletable while 178 tests passed
+
+`CLAUDE.md` caps the Reviewer at one use for the whole crit, reserved for the
+rewind/destruction interaction. Spending it after issues 5 and 6 merged — and
+telling it explicitly to treat *my own* merge resolution as suspect — returned
+the single worst finding of the night: **at 1920x1080 there was no way to
+trigger a rewind at all.** Both triggers were unavailable; the on-screen
+control lived inside the container my own earlier fix correctly hides in
+landscape, and no rewind key existed. Every module was right in isolation.
+
+It also found that the re-entry guard compared sub-pixel floats, so re-entering
+a machine silently *re-armed* instead of rewinding — which converts a small
+anchor into a large one and kills room 3's intended solution with no recovery.
+Fixes in [`ce863c1`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/ce863c1); the room-3 protection is a regression
+test over the whole *sequence*, not the comparison.
+
+The lesson I'd keep: the Reviewer earned its cost because it was pointed at one
+cross-cutting invariant and told what was newest and least reviewed, not asked
+to "review the code".
+
+### 4. Verification that finds design errors, not just code errors
+
+`plan.md` §7 made a test-only BFS solver the centrepiece: expensive
+verification in `pnpm check`, trivial runtime. It paid off twice.
+[`7728091`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/7728091) — while building it, the Builder found it had
+modelled growth, coolant and arming as *optional* edges when the game makes
+them automatic on tile entry, which manufactures dead-ends that don't exist and
+would have made its own correctness properties confidently wrong.
+
+Then in [`8531e46`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/8531e46), room 3 — the only losable room — took
+four attempts, every hand-derivation wrong, each corrected by reading
+`solveRoom()`'s actual output. A single fragile tile under the coolant is
+never load-bearing, because a large body's two-wide footprint is always
+shielded by whichever neighbouring column survives. The room the crit is judged
+on was authored against a machine-checked oracle instead of intuition, and the
+solver asserts `dead === flagged` exactly: 64 of 64, no mismatch either way.
 
 ## Before you ship
 
-`pnpm check:evidence` verifies your citations resolve to real commits, that a
-reflection entry the marker reads is in `reflections/`, and that your
-`CLAUDE.md` is there --- before a marker ever opens the file. It checks that
-your map is traceable, not that it is good: the marker judges whether your
-small, deliberately chosen set of moments shows real judgement and reflection. A
-green check is not a substitute for that curation.
-
-Images aren't checked: unlike a citation whose SHA doesn't resolve, a broken
-image is visible the moment this file is rendered on GitHub.
+`pnpm check` runs the suite; `pnpm check:dispatch` gates a handoff to a
+Builder; `pnpm check:evidence` verifies these citations resolve.

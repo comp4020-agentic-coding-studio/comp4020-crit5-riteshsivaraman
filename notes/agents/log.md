@@ -1048,3 +1048,12 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   debug files used while iterating room 3's geometry
   (`spec/scratch_debug3.test.ts` and others) deleted before this commit —
   none were deliverables.
+- **Orchestrator** [#12] — wrote `PROCESS.md` and a draft `reflections/crit-5.md`;
+  `pnpm check:evidence` now passes (8 citations resolve). Picked four moments,
+  all harness-landing rather than retries: the pre-dispatch gate, the four
+  checks that passed while measuring nothing, the Reviewer finding the game
+  uncompletable at 1920x1080 while 178 tests passed, and the solver catching
+  design errors in room 3 that four hand-derivations got wrong. The reflection
+  is a draft in Ritesh's voice and is marked as one — the second standing
+  prompt is a claim only he can make, and a marker reading an unedited agent
+  answer there is worse than a shorter honest one.
