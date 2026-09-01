@@ -483,3 +483,64 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   unverified; no browser was connected this session either.
   `pnpm check` green, 127 tests (up from 125 — 2 new in
   `spec/hidden-display.test.ts`).
+- **Builder-Tester** [#4 #6 #8 #9] — built `src/game/player.ts`: two
+  hitboxes (small 8x10, large 16x20, plan.md §8), warm/cool player colours
+  (`PLAYER_COLOR`), a squash/stretch transition timer
+  (`initialSizeState`/`requestSizeChange`/`advanceSizeTransition`/
+  `transitionScale`, ~0.6s per plan.md §8), and the safe-growth predicate
+  this issue's brief calls "the real invariant" — `canOccupy(x, y, width,
+  height, level, destroyed)` (an AABB-vs-solid-tiles scan, mirroring
+  physics.ts's own private `isSolidAt` since that module doesn't export
+  it) and `canChangeSize(x, y, from, to, level, destroyed)` (anchors the
+  target hitbox bottom-centre on the current one, feet planted, then
+  calls `canOccupy`). Both are standalone exports, not buried in
+  `requestSizeChange`'s state machine, specifically so **#6's rewind
+  Builder and #8's solver can call them directly** — rewind needs
+  "does the restored anchor still fit" and the solver needs "is this
+  grow/shrink edge legal" without re-deriving either from scratch.
+  `requestSizeChange` is the no-op both ways the issue asks for: same-size
+  touch is a no-op by an identity check before `canChangeSize` even runs;
+  an unsafe grow is a no-op because `canChangeSize` refuses it — neither
+  is a special case bolted on top.
+  **The jump-SFX equality trap (this issue's brief, trap 2) does not
+  apply**: jump strength (`JUMP_SPEED`) is not varied by size anywhere in
+  this change, so `main.ts`'s existing `playerBody.vy === -JUMP_SPEED`
+  detection still matches exactly as before. Flagging this explicitly for
+  **#9's room author and anyone tuning feel later**: if large/small ever
+  get different jump strength, that equality check breaks silently (no
+  test covers it) and must be fixed at the same time, not left to rot.
+  **spec/rooms.test.ts and the "zero rooms" trap (trap 1)**: no real rooms
+  exist yet (#9). `validateGrowthPadClearance(level)` — "2 tiles headroom
+  and 2 tiles width" per plan.md §8, defined here as: the pad's own tile
+  column + the column to its right, crossed with the pad's own row + the
+  row above, must all be non-solid (fragile counts as solid, i.e. as if
+  nothing's destroyed yet) — is exercised against explicit fixtures in the
+  test file, including a deliberately bad one (1 tile headroom) that is
+  proven red-first (temporarily stubbed the validator to always return
+  `ok: true`, confirmed the bad-headroom/bad-width/fragile-blocking fixture
+  tests failed for exactly that reason, then restored). A separate,
+  explicitly named tripwire test asserts `src/game/rooms/` currently has
+  zero files — **that assertion is designed to start failing the moment
+  #9 adds real room modules**, forcing whoever lands #9 to replace it with
+  an actual per-room loop rather than the check quietly continuing to
+  pass over rooms it never looked at. **#9: do not delete that test
+  without replacing it** — that's the whole point of it being there.
+  Wired minimally into `main.ts` (additive, per this session's brief about
+  merge risk): the demo room's existing `G`/`C` tiles now actually trigger
+  `requestSizeChange` when the player's feet tile matches, resize
+  `playerBody` on success, play `grow`/`shrink` via `playSfx`, and drive
+  the visual squash/stretch + colour swap through `player.color` (added as
+  an *optional* field on `render.ts`'s `PlayerRect`, default unchanged for
+  every other caller). The spawn hitbox in `main.ts` now uses
+  `HITBOX.small` (8x10) instead of #14's placeholder 8x16, per that
+  issue's own log entry inviting #4 to make that call.
+  **Unverified**: `list_connected_browsers` returned `[]` again this
+  session — no real-browser pass was possible. The grow/shrink SFX,
+  squash/stretch feel, and colour legibility in the demo room are
+  therefore untested by a human; Ritesh's next real-browser pass should
+  cover those alongside the still-open items from #10's log entry.
+  `pnpm check` green, 150 tests (up from 125 — 17 new in
+  `spec/size.test.ts`, 7 new in `spec/rooms.test.ts`, 1 new in
+  `spec/pure-modules.test.ts` since it dynamically adds one "does not
+  reference a browser API" check per file under `src/game/` and now
+  finds `player.ts` too).
