@@ -15,6 +15,14 @@ import {
 } from "../game/render";
 import { createBody, stepBody, JUMP_SPEED, type Body, type PhysicsLevel } from "../game/physics";
 import { createInputController } from "../game/input";
+// Issue #5: destructible walls. world.ts owns the room's permanent
+// `destroyed` set (createWorld/restart) and the one rule for changing it
+// (breakTile, wrapped here by resolveFragileContact for per-frame contact
+// detection) — see notes/agents/log.md [#5] for why breakTile/restart are
+// kept structurally distinct. main.ts owns the juice (squash, debris,
+// screen-shake) and the two SFX calls (fragileImpact/destroy) that go with
+// it; world.ts itself never touches audio or the DOM (plan.md §5).
+import { createWorld, resolveFragileContact, type World } from "../game/world";
 // Issue #4: size system. Pure module — see notes/agents/log.md [#4] for why
 // the safe-growth predicate and the transition timer live there and not
 // inline here. main.ts's only job is to notice when the player is standing
@@ -150,7 +158,12 @@ function buildDemoRows(): string[] {
 }
 
 const demoLevel = parseLevel(buildDemoRows());
-const demoDestroyed = new Set<string>();
+// Issue #5: real permanent-within-the-room state, replacing the throwaway
+// `new Set()` this line used to be (#14's placeholder, before world.ts
+// existed). `demoWorld` is reassigned (not mutated) by `step()` — every
+// `resolveFragileContact`/`breakTile` call returns a fresh `World` rather
+// than editing one in place, so this stays a plain variable, not a class.
+let demoWorld: World = createWorld();
 // Issue #4: the small hitbox is the real spawn size (8x10), replacing #14's
 // throwaway 8x16 placeholder per that issue's own log entry ("do not treat
 // it as load-bearing" — this is the Builder that gets to decide).
@@ -173,9 +186,38 @@ const physicsLevel: PhysicsLevel = {
   tileSize: TILE,
   widthPx: ROOM_WIDTH_TILES * TILE,
   heightPx: ROOM_HEIGHT_TILES * TILE,
-  isSolidTile: (tileX, tileY) => isSolidAt(demoLevel, tileX, tileY, demoDestroyed),
+  isSolidTile: (tileX, tileY) => isSolidAt(demoLevel, tileX, tileY, demoWorld.destroyed),
 };
 let playerBody: Body = createBody(player.x, player.y, player.width, player.height);
+
+// Issue #5's juice — squash, debris, restrained screen-shake — all owned
+// here, not in world.ts (plan.md §5: world.ts stays pure/browser-free).
+// None of this affects `demoWorld` or collision; it only affects what
+// gets drawn for a few hundred ms after a break.
+type Debris = { x: number; y: number; vx: number; vy: number; lifeMs: number };
+const DEBRIS_LIFE_MS = 260;
+const SHAKE_DURATION_MS = 140;
+const SHAKE_MAGNITUDE_PX = 1.5; // restrained, per the brief — this is a 320x180 backbuffer
+const IMPACT_SQUASH_MS = 110;
+let debris: Debris[] = [];
+let shakeMs = 0;
+let impactMs = 0; // brief player squash on any fragile contact, break or not
+
+function spawnDebris(tileX: number, tileY: number): void {
+  const cx = tileX * TILE + TILE / 2;
+  const cy = tileY * TILE + TILE / 2;
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2 + Math.random() * 0.6;
+    const speed = 20 + Math.random() * 25;
+    debris.push({
+      x: cx,
+      y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 15,
+      lifeMs: DEBRIS_LIFE_MS,
+    });
+  }
+}
 
 let paused = false;
 function togglePause(): void {
@@ -199,7 +241,7 @@ function step(fixedDeltaMs: number): void {
   const wasGrounded = playerBody.grounded;
   const prevVy = playerBody.vy;
 
-  playerBody = stepBody(playerBody, input, physicsLevel, demoDestroyed, fixedDeltaMs);
+  playerBody = stepBody(playerBody, input, physicsLevel, demoWorld.destroyed, fixedDeltaMs);
 
   // Jump/land are "decided" right here, the instant stepBody's new Body
   // comes back — not inside physics.ts (which must stay pure, plan.md §5)
@@ -229,7 +271,7 @@ function step(fixedDeltaMs: number): void {
   const feetChar = feetRow ? feetRow[feetTileX] : undefined;
   const target = feetChar === "G" ? "large" : feetChar === "C" ? "small" : null;
   if (target) {
-    const change = requestSizeChange(sizeState, target, playerBody.x, playerBody.y, physicsLevel, demoDestroyed);
+    const change = requestSizeChange(sizeState, target, playerBody.x, playerBody.y, physicsLevel, demoWorld.destroyed);
     if (change.triggered) {
       sizeState = change.state;
       const box = HITBOX[target];
@@ -239,12 +281,61 @@ function step(fixedDeltaMs: number): void {
   }
   sizeState = advanceSizeTransition(sizeState, fixedDeltaMs);
 
+  // Issue #5: does the player's current AABB touch a fragile ('=') tile?
+  // world.ts's resolveFragileContact is the entire decision (large breaks
+  // it, permanently; small is blocked and merely bumps) — this call site
+  // only reacts to what it reports, exactly like the growth-pad call
+  // above reacts to requestSizeChange's `triggered`.
+  const contact = resolveFragileContact(
+    demoWorld,
+    playerBody.x,
+    playerBody.y,
+    playerBody.width,
+    playerBody.height,
+    sizeState.size,
+    demoLevel,
+  );
+  demoWorld = contact.world;
+  if (contact.broken.length > 0) {
+    playSfx("destroy");
+    shakeMs = SHAKE_DURATION_MS;
+    impactMs = IMPACT_SQUASH_MS;
+    for (const tile of contact.broken) spawnDebris(tile.x, tile.y);
+  } else if (contact.touchedFragile.length > 0) {
+    // Small body pressed against a wall it can't break yet — the bump
+    // feedback, distinct from the "destroy" crack.
+    playSfx("fragileImpact");
+    impactMs = IMPACT_SQUASH_MS;
+  }
+
+  // Juice timers decay every frame regardless of whether anything broke
+  // this frame — plain countdowns, no clock reads (dtMs comes from the
+  // fixed-step loop, same as every other timer in this file).
+  shakeMs = Math.max(0, shakeMs - fixedDeltaMs);
+  impactMs = Math.max(0, impactMs - fixedDeltaMs);
+  debris = debris
+    .map((d) => ({
+      ...d,
+      x: d.x + d.vx * (fixedDeltaMs / 1000),
+      y: d.y + d.vy * (fixedDeltaMs / 1000),
+      vy: d.vy + 260 * (fixedDeltaMs / 1000), // light gravity, debris-only
+      lifeMs: d.lifeMs - fixedDeltaMs,
+    }))
+    .filter((d) => d.lifeMs > 0);
+
   // Squash/stretch is drawn-only (plan.md §8): the hitbox above already
   // swapped instantly, so collision never reasons about an in-between
   // size. This just scales what's blitted, keeping feet visually planted.
   const scale = transitionScale(sizeState);
-  const drawWidth = playerBody.width * scale.scaleX;
-  const drawHeight = playerBody.height * scale.scaleY;
+  // A brief, separate squash on fragile contact/impact, on top of the
+  // size-change scale — same sine-bump shape, shorter and subtler, so a
+  // wall impact reads distinctly from a grow/shrink.
+  const impactT = impactMs / IMPACT_SQUASH_MS;
+  const impactBump = Math.sin(Math.max(0, impactT) * Math.PI) * 0.12;
+  const scaleX = scale.scaleX * (1 + impactBump);
+  const scaleY = scale.scaleY * (1 - impactBump);
+  const drawWidth = playerBody.width * scaleX;
+  const drawHeight = playerBody.height * scaleY;
   player.x = playerBody.x + (playerBody.width - drawWidth) / 2;
   player.y = playerBody.y + playerBody.height - drawHeight;
   player.width = drawWidth;
@@ -253,7 +344,27 @@ function step(fixedDeltaMs: number): void {
 }
 
 function render(): void {
-  renderLevel(ctx as unknown as RenderCtx, atlas, demoLevel, demoDestroyed, player);
+  // Restrained screen-shake: a random +-SHAKE_MAGNITUDE_PX jitter that
+  // decays to 0 as shakeMs runs out, applied as a context translate around
+  // the whole frame so nothing inside renderLevel needs to know about it.
+  const shakeT = shakeMs / SHAKE_DURATION_MS;
+  const shakeAmount = Math.max(0, shakeT) * SHAKE_MAGNITUDE_PX;
+  const shakeX = shakeAmount > 0 ? (Math.random() * 2 - 1) * shakeAmount : 0;
+  const shakeY = shakeAmount > 0 ? (Math.random() * 2 - 1) * shakeAmount : 0;
+
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+  renderLevel(ctx as unknown as RenderCtx, atlas, demoLevel, demoWorld.destroyed, player);
+
+  // Debris: small fading rects at each particle's current position. Kept
+  // here rather than in render.ts's per-tile blit loop — this is transient
+  // per-frame juice state, not level geometry.
+  for (const d of debris) {
+    const alpha = Math.max(0, Math.min(1, d.lifeMs / DEBRIS_LIFE_MS));
+    ctx.fillStyle = `rgba(180, 170, 150, ${alpha})`;
+    ctx.fillRect(d.x - 1, d.y - 1, 2, 2);
+  }
+  ctx.restore();
 }
 
 const loop: Loop = createLoop(step);

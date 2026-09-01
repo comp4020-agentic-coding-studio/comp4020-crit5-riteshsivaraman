@@ -544,3 +544,95 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   `spec/pure-modules.test.ts` since it dynamically adds one "does not
   reference a browser API" check per file under `src/game/` and now
   finds `player.ts` too).
+- **Builder-Tester** [#5 #6] — built `src/game/world.ts`, the room's
+  permanent `destroyed` state (plan.md §6). Exported API, verbatim:
+  `type World = { readonly destroyed: ReadonlySet<string> }`;
+  `createWorld(): World`; `breakTile(world, x, y, size, level): World`
+  (the entire §6 rule in one place — no-op unless the tile at (x,y) is
+  currently `fragile` per `level.ts`'s static kind and `size` is
+  `"large"`; idempotent by construction — returns the *same* `World`
+  reference, not a rebuilt equal one, when there's nothing to do, so
+  callers can diff by identity); `tilesInContact(x, y, width, height,
+  tileSize)` (which tile cells an AABB overlaps or is pressed flush
+  against — physics.ts's collision resolver stops a body exactly at a
+  solid tile's edge with no overlap, so this scans a 1px margin around
+  the AABB, not just its interior); `resolveFragileContact(world, x, y,
+  width, height, size, level)` (the per-frame convenience main.ts wants:
+  scans `tilesInContact`, calls `breakTile` on each fragile candidate,
+  returns `{ world, touchedFragile, broken }` so a caller can drive SFX/
+  juice off `broken.length` without re-deriving contact); `restart():
+  World` (full reset, `destroyed` cleared).
+  **Permanence vs. restart — this issue's trap.** `breakTile` always
+  takes a `World` and returns a derived one (same reference if nothing
+  changed); `restart` takes **no** `World` argument at all and always
+  returns a brand-new empty one. That asymmetry is the whole guard: there
+  is no call shape through which a partial or accidental clear could
+  happen, and no way to make `breakTile` remove an entry — the only
+  operation on `destroyed` that isn't strictly additive is `restart`,
+  and its signature makes that visible at every call site without
+  reading this file.
+  **Tagged for #6 (rewind), exact contract**: rewind **may** read
+  `world.destroyed` — pass it straight through to `canOccupy`/
+  `canChangeSize` (player.ts) when checking whether a restored anchor
+  still fits, same as any other caller. Rewind **may not** call
+  `breakTile` or `restart` — and per this session's dispatch brief,
+  issue #6 doesn't import `world.ts` at all (it defines its own minimal
+  structural interface and takes it as a parameter, the way physics.ts
+  defines `PhysicsLevel` rather than importing level.ts), so this is
+  enforced structurally, not just by convention: `rewind.ts` has no
+  handle on this module's functions to call in the first place. main.ts
+  is the only place that wires both `resolveFragileContact` (per-frame,
+  permanent) and whatever issue #6 lands for restart-vs-rewind — keep
+  those two call sites textually distinct there.
+  Wired into `main.ts`, additive: `demoDestroyed` (a bare mutable `Set`,
+  #14's placeholder before this module existed) is now `demoWorld: World`,
+  reassigned each frame from `resolveFragileContact`'s result rather than
+  mutated in place. `step()` calls `resolveFragileContact` with the
+  player's current AABB/size every frame; `contact.broken.length > 0`
+  plays `"destroy"` (this issue's SFX, plan.md §11) and triggers a brief
+  player squash, a restrained 140ms/1.5px screen-shake (translate around
+  the whole `render()` call, decaying to 0), and ~6 debris rects per
+  broken tile with light gravity and a ~260ms fade; `touchedFragile.length
+  > 0` with nothing broken (a small body blocked by the wall) plays
+  `"fragileImpact"` instead — the bump-without-break feedback the brief
+  asks for. Neither SFX call nor any of the juice lives in `world.ts`
+  itself (plan.md §5 — that module stays pure/browser-free); `main.ts` is
+  the browser-facing half, same split as issue #11's audio.ts/game vs.
+  scripts.
+  `spec/destruction.test.ts` (11 tests): `breakTile` — small body refuses/
+  leaves `destroyed` empty, tile stays solid; large body breaks it, tile
+  becomes passable; a solid `'#'` tile can't be broken even by large;
+  idempotent (second `breakTile` call on an already-broken tile returns
+  the *same* `World` reference). `tilesInContact` — finds a tile a body
+  is pressed flush against (no overlap) and correctly excludes one a full
+  tile further away. `resolveFragileContact` — small touches-but-doesn't-
+  break (tile stays solid, "blocked"), large touches-and-breaks (tile
+  becomes passable), and a body nowhere near the wall touches/breaks
+  nothing and gets the identical `World` reference back. `restart` —
+  clears `destroyed` after a prior break; two `restart()` calls never
+  return the same `World`/`Set` reference (no shared-state leak between
+  "resets").
+  **Confirmed red first, for the right reason**: temporarily dropped
+  `breakTile`'s `size !== "large"` gate and its already-destroyed
+  early-return, reran `spec/destruction.test.ts` — 3 of 11 failed exactly
+  where expected (the small-body-refuses assertion now saw `destroyed`
+  gain an entry; the idempotence assertion saw a second, distinct `World`
+  object where it expected the same reference back; `resolveFragileContact`'s
+  small-body test saw a break that shouldn't have happened), the other 8
+  stayed green because they don't exercise either guard. Restored the
+  real implementation, reran — all 11 green. This is also why the test
+  file asserts reference identity (`toBe`, not just `toEqual`) for the
+  idempotence and restart cases: a version that silently rebuilt an
+  equal-but-distinct `World`/`Set` every call would pass a looser
+  `toEqual` check while still doing real work it didn't need to.
+  **Unverified**: no browser was connected this session either
+  (`tabs_context_mcp` reported the extension not connected, same as every
+  prior session's log entry) — the squash/debris/shake juice, the
+  fragileImpact-vs-destroy SFX distinction, and the fragile tile's visual
+  legibility (already built by #14/#2, not touched here) are untested by
+  a human. Next real-browser pass should cover this alongside every
+  earlier issue's still-open browser items.
+  `pnpm check` green, 164 tests (up from 152 — 11 new in
+  `spec/destruction.test.ts`, 1 new in `spec/pure-modules.test.ts` since
+  it dynamically adds one "does not reference a browser API" check per
+  file under `src/game/` and now finds `world.ts` too).
