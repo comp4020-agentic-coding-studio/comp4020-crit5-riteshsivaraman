@@ -1129,3 +1129,18 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   case). Did not touch resolveFragileContact, rewind.ts, world.ts,
   input.ts, layout.ts, main.ts, notes/walkthrough.md, PROCESS.md, or
   reflections/.
+- **Orchestrator** [#8 #9 #15] — room 3's rewind machine was skippable: a jump
+  over it left the player able to grow with no small anchor, and every one of
+  the room's 156 dead states required exactly that. Roofed the approach lane
+  (row 13, cols 1–5). Dead states fell 156/394 → 50/267 and
+  "large with a large anchor" went to zero. The residual 50 are a *solver*
+  artefact, not a real route: its jump edge lands on a destination without
+  modelling headroom at the origin (solver.ts's recorded limitation), so it
+  still believes the hop exists. Real physics checks collision, so the
+  guarantee is asserted in `spec/room3-approach.test.ts` against `stepBody`
+  instead — proven red by deleting the ceiling. Where the solver cannot decide
+  something, assert it at the layer that can rather than trusting either.
+- **Orchestrator** [#12 #15] — cut issue 15 (rewind ghost + effect) for budget:
+  $109 of $120 spent, resets 3 Sep. The arming SFX and the now-visible
+  contextual control are the only feedback the mechanic has. This is a real
+  gap in the no-tutorial rule, recorded in PROCESS.md rather than papered over.
