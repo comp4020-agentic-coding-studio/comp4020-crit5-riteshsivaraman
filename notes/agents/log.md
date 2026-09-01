@@ -879,3 +879,64 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   real rooms (#9), or rewind visuals (#15), per this session's scope.
   `pnpm check` green, 215 tests (up from 205 — 10 new, all in
   `spec/room.test.ts`).
+
+[#8 #9 #15] Solver sensor (plan.md §7): `src/game/solver.ts` BFS over
+  `(tileX, tileY, size, destroyedMask, anchor)`, reusing the real
+  `canOccupy`/`tilesInContact`/`arm`/`rewind`/`isRoomDead`/`hasWon`/
+  `simulateJumpArc` primitives rather than re-deriving solidity or the
+  rewind contract by hand. Footprint is rounded up to a full tile block
+  (small 1x1, large 2x2, matching `validateGrowthPadClearance`'s own
+  convention) — deliberately conservative, so the solver can only
+  under-credit reach, never certify an unsolvable room solvable.
+  Found and fixed a real bug during development: growth/coolant/arm
+  tile-entry were originally modeled as optional edges alongside an
+  unmodified "just standing there, untriggered" state, contradicting
+  `enterRewindTile`'s doc comment establishing these as automatic and
+  unconditional on tile entry. This manufactured false dead-end states (29
+  of them, all `anchor: null`, in an early room-2 fixture). Fixed via
+  `resolveAuto`, which settles a raw movement target and then applies
+  growth/coolant/arm/rewind resolution in a loop (capped at 20 iterations,
+  with a `rewoundThisSettle` guard against an infinite self-rewind loop)
+  until nothing more fires — every edge, and the spawn state, now routes
+  through this instead of a bare `settle()`.
+  Also found, and NOT fixed in code (deliberately — see below): same-height
+  jump edges check only their destination tile and land there directly,
+  never modeling any tile passed over mid-flight. A room whose `G`, `C` or
+  `R` tile is only encountered *mid-jump* — in an open hallway within jump
+  range, never itself a landing spot — is modeled by this solver as never
+  triggering at all, so the solver may report that room unsolvable even
+  though a real player, whose body does pass over the tile, can complete
+  it. This is conservative in direction (under-credits reach, never
+  over-credits it), so it doesn't violate plan.md §7's bias requirement,
+  but issue 9's author needs it stated plainly: every `G`/`C`/`R` in a real
+  room must be reachable by *landing* on it (walking onto it, or a jump
+  whose destination tile IS the entity tile), not merely by flying over it
+  as part of a longer jump's arc. Recorded in `solver.ts`'s own header
+  comment as well, not just here.
+  `spec/solver.test.ts` is the actual sensor: four properties (exit
+  reachable from spawn; every fatal-predicate-matching state genuinely
+  unreachable-to-exit; every reachable dead state matches some fatal
+  predicate; room-1/room-2 have zero dead states at all) checked against
+  three ASCII room fixtures plus a deliberately unsolvable one, each
+  proven to bite by breaking something real (removing room 1's coolant —
+  correctly flips `solvable` to `false`; substituting room 3's genuinely
+  dead states into room 2's "zero dead states" assertion — correctly goes
+  red with the 11 actual large-and-stuck states in the diff) and
+  confirming the expected red output before reverting. Jump arc numbers
+  (`JUMP_MAX_HEIGHT_TILES`/`JUMP_MAX_RANGE_TILES`) are derived from
+  `simulateJumpArc(TILE, DEFAULT_STEP_MS)`, not hand-copied. A tripwire
+  mirroring `spec/rooms.test.ts`'s pattern scans `src/game/rooms/` and
+  fails loudly the day issue 9 adds real room files, forcing a human to
+  replace the synthetic fixtures with a real per-room loop rather than let
+  this file silently keep checking only its own fixtures forever.
+  **Not built** (explicit scope cut, per this issue's brief): real rooms
+  (#9), the rewind ghost/visual effect (#15), the no-instructions sensor
+  (#12). Did not touch `resolveFragileContact`.
+  **Unverified**: the jump-mid-path limitation above is recorded, not
+  fixed — no room exists yet to demonstrate it concretely (issue 9's
+  problem to avoid, not this issue's to solve). No human/browser
+  playthrough of this sensor makes sense (it has no runtime caller by
+  design — `spec/pure-modules.test.ts` enforces that solver.ts stays
+  import-only-by-spec/), so "verification" here is entirely the test
+  file's own red/green proofs described above.
+  `pnpm check` green, 231 tests (15 new, all in `spec/solver.test.ts`).
