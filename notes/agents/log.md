@@ -159,3 +159,45 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   chrome with default blue links above a black canvas, and an h1 band
   identical in colour to the canvas, both read as an unfinished template —
   cosmetic only, no game rules touched.
+- **Builder-Tester** [#2 #9] — decided `TILE = 10`, keeping the code-authored
+  atlas rather than switching to the 16px Kenney CC0 fallback. Reasoning: the
+  code-authored art is not "genuinely failing" — the fallback clause in plan.md
+  §4/issue 2 is conditional on that, and the legibility sensor (below) passes
+  with margin (fragile vs solid differs in 100/100 pixels, well past the 25%
+  floor; the three mechanic colours are >200 apart in RGB space, well past the
+  80-unit distinguishability threshold the test uses). Switching to 16px buys
+  nothing here and would force re-deriving every clearance constant issues
+  3–9 haven't written yet. This is the fallback call plan.md required be made
+  before issue 9: made now, decided to keep 10, not deferred.
+- **Builder-Tester** [#2] — built `src/game/tiles.ts` (`TILE=10`, the
+  `TileChar`→`TileKind` table, `isSolidKind`/`isSolidChar`), `src/game/
+  tileset.ts` (fixed 9-colour palette + one 10x10 character-grid literal per
+  `TileKind`, plus a pure `tilePixels(kind) -> Uint8ClampedArray`), and
+  `src/game/level.ts` (`parseLevel(rows, fatal?) -> Level`, `isSolidAt`,
+  `tileKindAt`). All three are pure — no canvas, no DOM — and pass
+  `spec/pure-modules.test.ts` unmodified, because baking the atlas into an
+  actual canvas is left to `render.ts` (not yet built): `tilePixels` hands
+  render.ts flat RGBA bytes to `putImageData`/`drawImage` from, so the DOM
+  boundary plan.md draws between rules and render falls naturally at
+  tileset.ts's edge rather than needing a carve-out. `Level.fatal` is typed
+  `Array<(world: unknown) => boolean>` since `world.ts` (issue 6) doesn't
+  exist yet — level.ts only carries these opaquely, it never calls them, so
+  whoever builds `world.ts`/`rules.ts` can narrow the type without touching
+  level.ts's call sites. `parseLevel` also rejects more than one `P` or `E`
+  (issue 2 only asked for zero-of-each, but an ambiguous spawn/exit is the
+  same failure mode and free to catch at parse time).
+  Tests: `spec/level.test.ts` (fixture map covering every §8 character,
+  solidity for all ten, fragile destroy/restore, out-of-bounds-as-solid,
+  the four rejection cases) and `spec/legibility.test.ts` (grid shape +
+  palette-membership for every tile, fragile-vs-solid ≥25% pixel diff,
+  mechanic-colour mutual distinguishability, mechanic colours absent from
+  terrain, each mechanic tile using only its own reserved colour). `pnpm
+  check` green: typecheck, build, and all 9 vitest files / 73 tests total
+  (including the new level.test.ts and legibility.test.ts). No browser available
+  this session (`list_connected_browsers` returned `[]`) — the rendered
+  tiles have not been eyeballed in an actual page; the sensor proves fragile
+  and solid *differ*, not that either reads as "industrial" to a human. The
+  next session with a working browser (or Ritesh, per plan.md's "then look
+  at the rendered tiles" line) should do that visual pass once `render.ts`
+  exists to blit the atlas — this issue ships the data and the sensor, not
+  a rendered canvas, since `render.ts` is out of issue 2's scope.
