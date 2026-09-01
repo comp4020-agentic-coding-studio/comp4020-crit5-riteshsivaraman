@@ -111,116 +111,53 @@ wrong badly enough to lose.
 
 ## Room 3 — The Machine (the only room you can lose)
 
+> Re-authored after this document was first written. The coolant moved from
+> column 17 to column 21, behind a gate only a small body fits through, so it
+> can no longer substitute for the rewind. Verified with the solver:
+> `solveRoom(room3).solvable === true`, and
+> `solveRoom(room3, {allowRewind: false}).solvable === false`.
+
 ```
-#........#######################
 #........=........#......#.....#
-#P..R.G..=.......C............E#
+#P..R.G..=...........C........E#
 ################==##############
 ################..##############
+     ^  ^  ^          ^        ^
+     R  G  wall A     C        E
 ```
-(full ceiling above and floor below omitted)
 
-Legend: `#` solid wall · `=` fragile wall · `G` growth pad · `C` coolant ·
-`R` rewind machine · `P` spawn · `E` exit · `.` open floor
+`P` spawn · `R` rewind machine · `G` growth pad · `=` fragile · `C` coolant ·
+`E` exit. The `#` at row 13 columns 18 and 25 are low ceilings: a small body
+passes, a large one cannot.
 
-**Teaching (plan.md §9):** requires combining size + rewind, and is the one
-room that can actually be lost.
+**What it teaches:** the two mechanics together. Rewind is now load-bearing —
+the room is provably unsolvable without it.
 
-**The solver's actual shortest path — and an important divergence from the
-design intent:**
+**Solution**
 
-Running the solver on the real room turns up something plan.md §9 doesn't
-anticipate: **the rewind machine is not actually required to solve this
-room.** The shortest path found is:
+1. Walk right. **Do not jump.** Stepping onto the machine at column 4 arms it
+   while you are small.
+2. Continue onto the growth pad at column 6. You grow.
+3. Walk into the cracked wall at column 9. Large, you break it.
+4. You are now stuck: too large for the ceiling ahead, and walking further
+   right breaks the floor at columns 16–17 and drops you in a pit.
+5. **Press R.** You return to the machine, small, and the wall stays broken.
+6. Walk right through the opening, under both ceilings, to the exit.
 
-1. Walk right from spawn. You pass directly over **R** and it arms
-   automatically (no cost to this — you don't have to use it).
-2. Continue right onto **G** — you grow automatically.
-3. Keep walking right into the first cracked wall (two fragile tiles,
-   stacked) — it breaks automatically. This is "wall A" — the one that's
-   mandatory to get further at all.
-4. Keep walking right, past where the wall was, still large. You will pass
-   directly over the coolant tile (**C**) — the moment your (2-tile-wide)
-   large body's footprint lines up over it, you shrink automatically,
-   *before* the game evaluates whether you're touching any fragile floor
-   tile that same frame. That ordering is what saves you here (see the
-   loss section below for why it matters).
-5. Now small, continue walking right. There are two single-tile-high
-   overhangs further down the lane that only a small body clears — you're
-   already small from the coolant, so you pass under both without needing
-   to do anything else.
-6. Continue right to **E**.
+**The caveat, and it is the important one**
 
-At no point in this path do you ever press R. Plan.md's brief for this
-room describes an "intended crossing" that arms the machine, grows, breaks
-wall A, **rewinds back to the small alcove**, and only then walks the small
-body the rest of the way. That is also a valid, solver-confirmed path
-(re-running the solver with jumping disabled reproduces exactly that
-sequence) — but it is not the *shorter* one, and a player who just keeps
-walking right the whole time, never touching R, reaches the exit anyway.
-The room's central lane simply doesn't force the "arm → break → rewind"
-combination the design intended; the coolant, sitting in the direct line
-of travel, does the same job rewind was meant to be required for.
-**Report this to Ritesh as a real design/build divergence**, not a
-walkthrough footnote — if "requires the combination" is meant to be
-enforced, this room currently doesn't enforce it.
+*Jumping over the machine at the start is fatal.* Skip it while small, grow,
+and you can never be small again — the coolant sits past a small-only gate.
+Every one of the room's 156 dead states (of 394 reachable) requires having
+skipped the machine while small; 66 of them do not involve the floor break at
+all.
 
-**The wrong move, and why it's fatal:**
+If you *did* arm the machine while small, the room can never become
+unwinnable — the solver reports **zero** dead states with a small anchor armed.
+Breaking the floor is recoverable: press R.
 
-The trap plan.md describes is real and the solver confirms it: if you walk
-into the coolant/ledge area **without having broken wall A and immediately
-continued moving** — specifically, if you rest a large body one tile short
-of the coolant tile (directly on top of the ledge, not yet triggering the
-auto-shrink) — your large footprint is sitting on the fragile floor tiles
-that are the *only* thing holding that ledge up, and it breaks
-automatically on contact, the same way any fragile wall does. There is no
-separate "break" button; it is a straight consequence of a large body
-touching a fragile tile, whether you meant to or not. The room's own
-source comment calls this "wall B" — the floor the coolant approach rests
-on.
-
-**Caveat:** don't linger while large anywhere near the coolant/ledge area.
-Keep moving through it in one motion (as the safe path above does) rather
-than stopping to look around. If you do stop there while still large, you
-may break the ledge under yourself without any warning prompt — it just
-happens.
-
-### On the loss condition specifically
-
-`room3.ts` defines the loss as `fatalRecess(state) || fatalLockout(state)`,
-evaluated every frame. The solver found 50 dead states out of 389 reachable
-states for the real room (all confirmed by `pnpm check`'s solver test to be
-correctly flagged — none are silent, none contradict a real escape).
-Sampling them:
-
-- Most of the sample look like `pos=(9,14)..(15,14) size=large
-  destroyed=[9,13;9,14;16,15] anchor=-` — a large body, anywhere along the
-  lane, once the ledge tile `16,15` has been destroyed and there is no
-  small-sized anchor armed. This is **fatalLockout**: once that one ledge
-  tile is gone, nothing in the room can turn you small again (the coolant
-  tile itself sits on the now-broken ledge — you can't stand there safely
-  anymore either), so a large body with no small anchor to fall back on is
-  dead no matter where it's standing. Rewinding doesn't rescue you here
-  unless the anchor you'd rewind *to* was recorded while you were small —
-  rewind restores your position and size, but the world (including the
-  now-missing ledge) stays exactly as broken as it was.
-- A smaller set look like `pos=(16,16)/(17,16) size=small ...
-  destroyed=[...16,15...] anchor=-` — this is **fatalRecess**: the ledge
-  breaking opens a two-tile-deep pit beneath it that no jump climbs out
-  of. If you fall into that pit with no anchor (or only a large anchor,
-  which just relands you in the lockout case above), you're stuck; the
-  *only* escape is rewind, and only a small-sized anchor actually helps.
-
-**In short: the two ways to die here are (1) you're large, the ledge is
-gone, and you have no small anchor to rewind to, or (2) you're physically
-standing in the pit the broken ledge left behind and either have no anchor
-or only a large one.** Rewind is the mechanic that could have saved you in
-either case — but only if you armed it *while small*, before things went
-wrong. Arming while large and then breaking the ledge is the actual trap;
-by the time you'd want to rewind, the only anchor on record is the wrong
-size for the world you're rewinding into.
-
----
+This is a known design flaw, not intended behaviour. `plan.md` §9 puts the
+machine in a safe alcove precisely so it cannot be missed.
 
 ## Finale — The Core
 

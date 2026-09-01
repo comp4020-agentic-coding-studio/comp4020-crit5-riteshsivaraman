@@ -1,9 +1,16 @@
-# COMP4020 static prototype template
+# Remnant
 
-A starter template for static-site prototypes in **COMP4020 / COMP8020 Agentic
-Coding Studio**. The course provisions a repo from this template for each
-deliverable --- you don't create it yourself. The `start` course skill clones it
-for you; from there, build your prototype and deploy it to GitHub Pages.
+A small browser game. You are something mechanical and alive in an abandoned
+facility, and you can change size. Machines in the walls remember where you
+were. What you break stays broken.
+
+Three rooms and a finale, about three minutes. Nothing is explained --- there
+is no tutorial, no text and no HUD anywhere in the game, by design: every
+mechanic is introduced by a safe demonstration before it is ever required.
+
+Built for COMP4020 crit 5. `PROCESS.md` is the reading-guide to how it came
+together; `plan.md` is the implementation plan; `notes/agents/log.md` is the
+decision log the agent sessions wrote to each other.
 
 ## CI and Pages only turn on when you ship
 
