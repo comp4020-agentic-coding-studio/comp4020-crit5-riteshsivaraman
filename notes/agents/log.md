@@ -1057,3 +1057,29 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   is a draft in Ritesh's voice and is marked as one — the second standing
   prompt is a claim only he can make, and a marker reading an unedited agent
   answer there is worse than a shorter honest one.
+- **Builder-Tester** [#8 #9 #15] — room 3's coolant sat at (17,14), inside
+  the only large-reachable resting column next to wall B, so walking right
+  after growing auto-shrank you back to small on contact: plan.md §9's
+  "requires the combination" was never actually enforced, the shortest
+  path never fired a rewind. Fixed by relocating coolant to (21,14), past
+  the col-18 low-ceiling gate that blocks large permanently, so it's still
+  landed-on by small (walking the lane after the intended rewind) but
+  never reachable while large. Collapsed the old two-predicate pair
+  (fatalLockout/fatalRecess, keyed to a specific broken tile) into one:
+  `size === "large" && !hasSmallAnchor` — verified exact against the
+  solver's own BFS dead-state set (394 reachable states, 156 dead, 156
+  flagged by the predicate, 0 mismatches either direction). Added
+  `SolveOptions.allowRewind` to solver.ts (default true, gates both the
+  explicit rewind edge and resolveAuto's re-trigger; every existing call
+  site is unaffected) so "requires rewind" is machine-checked rather than
+  read off a walkthrough. spec/solver.test.ts now asserts room 2 and room
+  3 are solvable with rewind but NOT without it, and room 1 / the finale
+  stay solvable without it. Proved the assertion bites: replayed it
+  against the pre-fix coolant position (col 17) and it correctly goes red
+  (`expect(...solvable).toBe(false)` receives `true`) — kept as a
+  permanent regression test rather than a one-off scratch run.
+  `pnpm check` green (typecheck + build + vitest), 236 tests (was 231; +5:
+  four new rewind-dependency assertions plus the red-first regression
+  case). Did not touch resolveFragileContact, rewind.ts, world.ts,
+  input.ts, layout.ts, main.ts, notes/walkthrough.md, PROCESS.md, or
+  reflections/.

@@ -327,4 +327,83 @@ describe("spec/solver.test.ts: solver sensor (plan.md §7)", () => {
       expect(result.stateCount).toBeGreaterThan(10);
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Issue #15: "room 3 requires the combination" is a claim about the
+  // REWIND specifically, not just about solvability in general. plan.md §9
+  // titles room 3 "requires the combination", but its shortest path used to
+  // never fire a rewind at all -- a coolant tile sitting in the main lane
+  // provided the same "small again" transition the rewind was meant to be
+  // the sole source of. The fix (room3.ts's #15 comment) relocates that
+  // coolant somewhere only reachable once already small, so it can never
+  // substitute for the rewind. This block encodes the design intent
+  // directly, via `solveRoom`'s `allowRewind: false` option (solver.ts),
+  // so a future edit that reintroduces the substitution regresses a test,
+  // not just a design doc.
+  //
+  // Room 2 gets the same assertion: plan.md §9's beat is a one-way drop
+  // into a dead end only a rewind escapes, and a walkthrough of the real
+  // room confirms the actual path fires one.
+  //
+  // Rooms 1 and the finale must stay solvable WITHOUT rewind -- they teach
+  // other things (plan.md §9: grow/break/shrink, and "nothing is
+  // explained" respectively), and asserting that keeps this sensor honest
+  // rather than trivially true for every room regardless of content.
+  // -------------------------------------------------------------------------
+  describe("issue #15: rewind must be load-bearing where plan.md says it is", () => {
+    it("room 1 is solvable WITHOUT rewind (it doesn't teach rewind)", async () => {
+      const { room1 } = await import("../src/game/rooms/room1");
+      expect(solveRoom(room1, { allowRewind: false }).solvable).toBe(true);
+    });
+
+    it("room 2 is solvable WITH rewind, but NOT without it", async () => {
+      const { room2 } = await import("../src/game/rooms/room2");
+      expect(solveRoom(room2).solvable).toBe(true);
+      expect(solveRoom(room2, { allowRewind: false }).solvable).toBe(false);
+    });
+
+    it("room 3 is solvable WITH rewind, but NOT without it", async () => {
+      const { room3 } = await import("../src/game/rooms/room3");
+      expect(solveRoom(room3).solvable).toBe(true);
+      expect(solveRoom(room3, { allowRewind: false }).solvable).toBe(false);
+    });
+
+    it("the finale is solvable WITHOUT rewind (atmosphere, not puzzle)", async () => {
+      const { finale } = await import("../src/game/rooms/finale");
+      expect(solveRoom(finale, { allowRewind: false }).solvable).toBe(true);
+    });
+
+    // Proven red-first (see notes/agents/log.md [#9 #15] for the actual
+    // failing output captured during authoring): restoring room 3's old
+    // coolant position (col 17, inside the large anchor's own footprint)
+    // makes it solvable without rewind again, for exactly the reason this
+    // whole block exists to catch.
+    it("proven red-first: with coolant back in the main lane, room 3 stops requiring rewind", () => {
+      const BUGGY_ROOM_3_ROWS = [
+        "################################",
+        "################################",
+        "################################",
+        "################################",
+        "################################",
+        "################################",
+        "################################",
+        "################################",
+        "################################",
+        "#........#######################",
+        "#........#######################",
+        "#........#######################",
+        "#........#######################",
+        "#........=........#......#.....#",
+        "#P..R.G..=.......C............E#",
+        "################==##############",
+        "################..##############",
+        "################################",
+      ];
+      const buggyLevel = parseLevel(BUGGY_ROOM_3_ROWS);
+      // This is the assertion above, run against the pre-#15 layout: it
+      // must fail (solvable true, not false) to prove the real assertion
+      // actually bites rather than passing vacuously.
+      expect(solveRoom(buggyLevel, { allowRewind: false }).solvable).toBe(true);
+    });
+  });
 });
