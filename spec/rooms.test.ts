@@ -97,28 +97,23 @@ describe("spec/rooms.test.ts: growth-pad clearance (plan.md §8)", () => {
     expect(validateGrowthPadClearance(level).ok).toBe(false);
   });
 
-  // Tripwire, not a vacuous pass — see file header. This is expected to
-  // start FAILING the moment issue 9 lands real rooms; that failure is the
-  // point, not a bug in this test.
-  it("has no authored rooms yet (issue 9) — replace this with a real per-room loop once rooms exist", () => {
+  // Issue 9 landed real rooms — the tripwire above has done its job (this
+  // suite no longer passes vacuously) and is replaced with the real loop
+  // it was demanding. `rooms/index.ts`'s ordering array is the single
+  // source of truth main.ts also consumes, so this test and the actual
+  // game check the same four levels.
+  it("every authored room has at least one file under src/game/rooms/", () => {
     const files = roomFiles();
-    expect(files).toEqual([]);
+    expect(files.length).toBeGreaterThan(0);
   });
 
-  it("(forward-looking) once rooms exist, every one of their G tiles must pass clearance", () => {
-    const files = roomFiles();
-    if (files.length === 0) {
-      // Nothing to check yet — the tripwire test above is what makes that
-      // fact visible, not this one going quietly green over zero rooms.
-      return;
+  it("every G tile in every authored room passes growth-pad clearance", async () => {
+    const { rooms } = await import("../src/game/rooms/index");
+    expect(rooms.length).toBeGreaterThan(0);
+    for (const room of rooms) {
+      const result = validateGrowthPadClearance(room);
+      expect(result.violations).toEqual([]);
+      expect(result.ok).toBe(true);
     }
-    // No dynamic import here: issue 9's room modules don't have an agreed
-    // export shape yet (plan.md §5 lists `rooms/room1.ts` etc. but issue 9
-    // is the one that decides what they export). Fail loudly so a human
-    // wires this up for real instead of it staying a silent no-op forever.
-    throw new Error(
-      `spec/rooms.test.ts: found room files ${JSON.stringify(files)} but this test was never ` +
-        "updated to import and validate them — fix this test, don't skip it.",
-    );
   });
 });

@@ -940,3 +940,111 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   import-only-by-spec/), so "verification" here is entirely the test
   file's own red/green proofs described above.
   `pnpm check` green, 231 tests (15 new, all in `spec/solver.test.ts`).
+
+[#9 #12 #15] Rooms 1-3 + finale authored under `src/game/rooms/` (`room1.ts`,
+  `room2.ts`, `room3.ts`, `finale.ts`, `index.ts` exporting the ordering
+  array `main.ts` and `spec/*.test.ts` both consume). Wired into
+  `main.ts`, replacing the old inline demo room; progression through the
+  four rooms on reaching `E`, room transitions go through `freshRoomState`
+  (Reviewer finding #4's fix — `anchor` reset per room, not module-scope
+  stale). Both tripwires (`spec/rooms.test.ts`'s empty-`roomFiles()` check,
+  `spec/solver.test.ts`'s empty-`roomFiles()` check) replaced with real
+  loops over `rooms` from `rooms/index.ts` — not deleted, not weakened —
+  covering growth-pad clearance and all four solver properties per room.
+
+  Single-screen adaptations from plan.md §9 (this repo has no camera —
+  32x18 fixed backbuffer, so anything written against a camera had to be
+  reinterpreted for one screen):
+  - Room 2's "taller vertical space": kept as a genuinely tall room
+    (spawn near the top, a one-way drop through the floor to a lower
+    chamber) rather than a scrolling reveal — the beat (rewind machine
+    visible above, broken wall visible below, "from up here the broken
+    wall is now a route") survives unchanged since it never required
+    scrolling, only verticality, which the fixed screen already has.
+  - Finale's "camera eases back": drawn as an already-open vast chamber
+    on arrival (taller ceiling than any other room, `:` decor scattered
+    through it standing in for the distant lights/cables/growth stations)
+    instead of revealed via a pull. `:` is non-colliding decor only, so
+    it needs neither growth-pad clearance nor solver checks.
+
+  Room 3 ("The Machine") is where nearly all of this issue's time went —
+  recorded in full because the reasoning is exactly the kind a reviewer
+  should be able to check without re-deriving it. plan.md §9 describes two
+  fragile walls (A: mandatory gate; B: the coolant's ledge, "visibly
+  load-bearing... off the direct path") and one dead end via the ledge.
+  **Judgment call, overridable**: kept both walls (did not take the
+  explicitly-sanctioned §12 cut to drop wall A) — wall A stayed simple and
+  uncontroversial, and dropping it would have removed the "grow → must
+  break something → rewind" beat that's the room's whole point.
+
+  Wall B's geometry is NOT what a literal reading of plan.md would
+  produce, and the reason is a genuine solver-behavior discovery, not a
+  narrative choice — a hand-derived version of this room was wrong four
+  separate times before switching to writing a throwaway debug harness
+  against the real `solveRoom()` output and iterating from its actual
+  counter-examples (recorded so the next room author doesn't repeat the
+  same dead ends):
+  - A single fragile tile under coolant is never load-bearing for a
+    *large* body: large's footprint is 2 tiles wide, and `canOccupyAt`'s
+    support check only needs ONE of the two floor tiles under a footprint
+    to still be solid to prevent a fall. Any open lane has two possible
+    large anchor columns next to a 1-tile ledge, so the untouched
+    neighbor always shields it — breaking the "load-bearing" tile does
+    nothing.
+  - Fix: a low one-tile ceiling at (18,13) — the exact same trick as the
+    existing small-only gate at col 25 — blocks a large body's footprint
+    from ever including column 18, leaving column 16 as the *only*
+    large-reachable anchor next to coolant. With only one anchor column
+    in play, plan.md's original two fragile tiles — (16,15) and (17,15) —
+    are exactly enough (both must be gone for that one anchor to lose
+    support), no third tile needed.
+  - Losing (16,15) specifically is fatal two different ways, and the
+    predicate in `room3.ts` (`fatalLockout`, `fatalRecess`) has to cover
+    both: (a) any *large* body anywhere in the room, once (16,15) is
+    gone, can never become small again (no other route to coolant
+    exists) — dead regardless of position; (b) a body that falls into the
+    pit under the broken tile cannot jump back out (a jump into a column
+    whose own floor just broke has nothing to land on and falls straight
+    back down) — the *only* escape is `rewind`, and only a **small**-sized
+    anchor actually rescues, because rewinding to a *large* anchor after
+    (16,15) is gone just re-lands you in case (a). Confirmed by direct
+    BFS inspection, not reasoning: `dead === flagged` exactly (64 states
+    each) with zero mismatches in both directions.
+  - **Flagged for the human**: this design depends on the current (open,
+    orchestrator-pending) contact-margin behavior in
+    `resolveFragileContact`/`tilesInContact` — a large body resting
+    *beside* wall B's tiles (not on top of them) still breaks them via
+    the ~1px contact margin. Room 2's existing design already depends on
+    this same behavior for its own fragile wall. Neither room was built
+    assuming it would change; if `resolveFragileContact` is ever
+    tightened to require standing exactly on a tile, both rooms need
+    re-verification against the solver, not just room 3.
+
+  **Other judgment calls, all overridable**: room 1's one-tile gap relies
+  on the small-only headroom bottleneck already proven in
+  `spec/solver.test.ts`'s room-1 fixture — no new mechanic invented.
+  Room 2's chamber shape is a straight port of the solver-fixture layout
+  already validated in issue #8's own tests, reused rather than
+  redesigned. All four rooms pass `validateGrowthPadClearance` and all
+  four `G`/`C`/`R` tiles are landed-on-directly (walked or jumped onto),
+  never merely passed over mid-jump — satisfying solver.ts's documented
+  jump-mid-path limitation by construction, checked by hand against each
+  room's ASCII, not by a new sensor.
+
+  **Solver results per room**: room 1 — solvable, 0 dead states. Room 2 —
+  solvable, 0 dead states. Room 3 — solvable, 503 states, 64 dead, all 64
+  correctly flagged by `room3.ts`'s predicate and nothing else flagged
+  that isn't actually dead (`property 2` and `property 3` both hold
+  exactly). Finale — solvable, 30 states, 0 dead (vacuous — no fatal
+  predicates, nothing to solve beyond walking to `E`).
+
+  **Not verified**: no browser was available in this session (the
+  claude-in-chrome extension reported not connected) — this room set has
+  not been played, only solved and typechecked. The next session with a
+  working browser should drive all four rooms manually before this is
+  considered done, per this issue's own brief (solver-green is necessary,
+  not sufficient).
+  `pnpm check` green (typecheck + build + vitest), 231 tests. Scratch
+  debug files used while iterating room 3's geometry
+  (`spec/scratch_debug3.test.ts` and others) deleted before this commit —
+  none were deliverables.

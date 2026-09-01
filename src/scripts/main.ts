@@ -4,7 +4,11 @@
 // and window events, and owns nothing that needs to be unit-testable.
 import { createLoop, type Loop } from "../game/loop";
 import { layout, INTERNAL_WIDTH, INTERNAL_HEIGHT, type Layout } from "../game/layout";
-import { parseLevel, isSolidAt } from "../game/level";
+import { isSolidAt, type Level } from "../game/level";
+// Issue #9: the real four-room progression, replacing issue #14's
+// single-screen fixture (buildDemoRows/demoLevel below no longer exist —
+// see notes/agents/log.md [#9] for the room-by-room design notes).
+import { rooms } from "../game/rooms/index";
 import { TILE, ROOM_WIDTH_TILES, ROOM_HEIGHT_TILES } from "../game/tiles";
 import {
   bakeAtlas,
@@ -131,48 +135,13 @@ const atlas = bakeAtlas(
   (data, width, height) => new ImageData(data as unknown as Uint8ClampedArray<ArrayBuffer>, width, height),
 );
 
-// Demo room: world.ts/rooms/*.ts (issues #6/#9) don't exist yet, so this is
-// a throwaway fixture built here in the bootstrap file, not a real room —
-// its only job is to put every tile kind on screen at once so a human can
-// judge legibility (issue 14's Done-when bullet 5) and to unblock the four
-// human checks issue 14 exists to unblock (notes/agents/log.md [#14]).
-// Exactly ROOM_WIDTH_TILES x ROOM_HEIGHT_TILES so it fills the 320x180
-// backbuffer with no camera/scroll needed.
-function buildDemoRows(): string[] {
-  const rows: string[][] = Array.from({ length: ROOM_HEIGHT_TILES }, () =>
-    Array.from({ length: ROOM_WIDTH_TILES }, () => "."),
-  );
-  const last = ROOM_HEIGHT_TILES - 1;
-  const right = ROOM_WIDTH_TILES - 1;
-
-  for (let x = 0; x < ROOM_WIDTH_TILES; x++) {
-    rows[0][x] = "%";
-    rows[last][x] = "%";
-  }
-  for (let y = 0; y < ROOM_HEIGHT_TILES; y++) {
-    rows[y][0] = "#";
-    rows[y][right] = "#";
-  }
-
-  // A floor to stand on, one row up from the bottom border, with a couple
-  // of fragile gaps so "=" reads next to solid "#" for comparison.
-  const floorY = last - 2;
-  for (let x = 1; x < right; x++) {
-    rows[floorY][x] = x === 10 || x === 11 ? "=" : "#";
-  }
-
-  rows[floorY - 1][6] = "G"; // growth pad
-  rows[floorY - 1][15] = "C"; // coolant
-  rows[floorY - 1][24] = "R"; // rewind machine
-  rows[floorY - 3][20] = ":"; // decor pipe, non-colliding
-
-  rows[floorY - 1][2] = "P"; // spawn
-  rows[floorY - 1][right - 2] = "E"; // exit
-
-  return rows.map((row) => row.join(""));
-}
-
-const demoLevel = parseLevel(buildDemoRows());
+// Issue #9: room progression state. `rooms` (src/game/rooms/index.ts) is
+// [room1, room2, room3, finale] — `roomIndex` is the only thing main.ts
+// adds on top of it. `currentLevel` is a `let`, not a `const`, precisely
+// because it changes on every room transition; every other reference to
+// the room's ASCII source below (`demoLevel`) is renamed to this.
+let roomIndex = 0;
+let currentLevel: Level = rooms[roomIndex];
 // Issue #5: real permanent-within-the-room state, replacing the throwaway
 // `new Set()` this line used to be (#14's placeholder, before world.ts
 // existed). `demoWorld` is reassigned (not mutated) by `step()` — every
@@ -183,7 +152,7 @@ let demoWorld: World = createWorld();
 // throwaway 8x16 placeholder per that issue's own log entry ("do not treat
 // it as load-bearing" — this is the Builder that gets to decide).
 let sizeState: PlayerSizeState = initialSizeState("small");
-const initialSpawn = spawnPosition(demoLevel.spawn, "small");
+const initialSpawn = spawnPosition(currentLevel.spawn, "small");
 const player: PlayerRect = {
   x: initialSpawn.x,
   y: initialSpawn.y,
@@ -202,7 +171,7 @@ const physicsLevel: PhysicsLevel = {
   tileSize: TILE,
   widthPx: ROOM_WIDTH_TILES * TILE,
   heightPx: ROOM_HEIGHT_TILES * TILE,
-  isSolidTile: (tileX, tileY) => isSolidAt(demoLevel, tileX, tileY, demoWorld.destroyed),
+  isSolidTile: (tileX, tileY) => isSolidAt(currentLevel, tileX, tileY, demoWorld.destroyed),
 };
 let playerBody: Body = createBody(player.x, player.y, player.width, player.height);
 
@@ -332,7 +301,18 @@ function showWinScreen(): void {
  * `player` rect) that src/game/ doesn't own.
  */
 function restartRoom(): void {
-  const fresh = freshRoomState(demoLevel, "small");
+  applyFreshRoomState(currentLevel);
+  status = "playing";
+  hideEndScreen();
+}
+
+// Issue #9: shared by restartRoom() (same room) and goToRoom() (next
+// room) — both need every field freshRoomState returns reassigned
+// together, plus the DOM/juice state src/game/ doesn't own. Factored out
+// so a room *transition* can never accidentally skip a field a same-room
+// restart already resets correctly.
+function applyFreshRoomState(level: Level): void {
+  const fresh = freshRoomState(level, "small");
   demoWorld = fresh.world;
   sizeState = fresh.sizeState;
   playerBody = fresh.body;
@@ -347,8 +327,21 @@ function restartRoom(): void {
   player.width = HITBOX.small.width;
   player.height = HITBOX.small.height;
   player.color = PLAYER_COLOR.small;
-  status = "playing";
-  hideEndScreen();
+}
+
+// Issue #9: advance to the next room on reaching a non-finale exit. This
+// is the fix for the Reviewer-found defect class this issue was assigned
+// to avoid repeating: `armed`'s anchor is module-scope and room-agnostic,
+// so carrying it (or `destroyed`, or the player's old tile coordinates)
+// into a new room's geometry would be wrong the instant the new room's
+// layout differs from the old one — freshRoomState (via
+// applyFreshRoomState above) is what guarantees every one of those fields
+// is reset together, atomically, on every transition, not just at
+// restart.
+function goToRoom(index: number): void {
+  roomIndex = index;
+  currentLevel = rooms[roomIndex];
+  applyFreshRoomState(currentLevel);
 }
 
 // Runs the player back to the armed anchor, per plan.md's brief
@@ -449,7 +442,7 @@ function step(fixedDeltaMs: number): void {
   // (e.g. no headroom) — this call site doesn't special-case either.
   const feetTileX = Math.floor((playerBody.x + playerBody.width / 2) / TILE);
   const feetTileY = Math.floor((playerBody.y + playerBody.height - 1e-6) / TILE);
-  const feetRow = demoLevel.grid[feetTileY];
+  const feetRow = currentLevel.grid[feetTileY];
   const feetChar = feetRow ? feetRow[feetTileX] : undefined;
   const target = feetChar === "G" ? "large" : feetChar === "C" ? "small" : null;
   if (target) {
@@ -475,7 +468,7 @@ function step(fixedDeltaMs: number): void {
     playerBody.width,
     playerBody.height,
     sizeState.size,
-    demoLevel,
+    currentLevel,
   );
   demoWorld = contact.world;
   if (contact.broken.length > 0) {
@@ -562,14 +555,17 @@ function step(fixedDeltaMs: number): void {
   player.height = drawHeight;
   player.color = PLAYER_COLOR[sizeState.size];
 
-  // Issue #7: the loss/win check, once per step, from a RoomState
+  // Issue #7/#9: the loss/win check, once per step, from a RoomState
   // assembled fresh from this frame's real values — never a second copy
-  // of any of them. `demoLevel.fatal` is empty in this throwaway demo
-  // room (issue #9 authors real rooms with real predicates), so
-  // isRoomDead is always false here; hasWon fires the moment the feet
-  // tile matches `demoLevel.exit`, which main.ts's demo room does place
-  // (see buildDemoRows) — reaching it is driveable today even without a
-  // real room.
+  // of any of them. `currentLevel.fatal` is empty for rooms 1, 2, and the
+  // finale (plan.md §9: only room 3 can be lost), so isRoomDead only ever
+  // fires there. `hasWon` fires the moment the feet tile matches
+  // `currentLevel.exit` — for rooms 1-3 that means "advance to the next
+  // room" (goToRoom, never the real end screen), and only the finale's
+  // `E` triggers the actual won status. `status` itself is left "playing"
+  // across a room-to-room advance — the fixed-step loop keeps running
+  // straight into the next room, no end screen in between (rooms 1-3
+  // aren't meant to feel like separate levels with a stop-and-go seam).
   const roomState: RoomState = {
     playerTileX: feetTileX,
     playerTileY: feetTileY,
@@ -577,12 +573,17 @@ function step(fixedDeltaMs: number): void {
     destroyed: demoWorld.destroyed,
     anchor: armed?.anchor ?? null,
   };
-  if (isRoomDead(roomState, demoLevel.fatal)) {
+  const isFinale = roomIndex === rooms.length - 1;
+  if (isRoomDead(roomState, currentLevel.fatal)) {
     status = "lost";
     showLossScreen();
-  } else if (hasWon(roomState, demoLevel.exit)) {
-    status = "won";
-    showWinScreen();
+  } else if (hasWon(roomState, currentLevel.exit)) {
+    if (isFinale) {
+      status = "won";
+      showWinScreen();
+    } else {
+      goToRoom(roomIndex + 1);
+    }
   }
 }
 
@@ -597,7 +598,7 @@ function render(): void {
 
   ctx.save();
   ctx.translate(shakeX, shakeY);
-  renderLevel(ctx as unknown as RenderCtx, atlas, demoLevel, demoWorld.destroyed, player);
+  renderLevel(ctx as unknown as RenderCtx, atlas, currentLevel, demoWorld.destroyed, player);
 
   // Debris: small fading rects at each particle's current position. Kept
   // here rather than in render.ts's per-tile blit loop — this is transient

@@ -275,23 +275,56 @@ describe("spec/solver.test.ts: solver sensor (plan.md §7)", () => {
     }
   }
 
-  it("has no authored rooms yet (issue 9) — replace this with a real per-room solveRoom() loop once rooms exist", () => {
+  it("every authored room has at least one file under src/game/rooms/", () => {
     const files = roomFiles();
-    expect(files).toEqual([]);
+    expect(files.length).toBeGreaterThan(0);
   });
 
-  it("(forward-looking) once rooms exist, every one of them must be run through solveRoom and pass properties 1-4", () => {
-    const files = roomFiles();
-    if (files.length === 0) {
-      // Nothing to check yet — the tripwire above is what makes that fact
-      // visible, not this test going quietly green over zero rooms.
-      return;
+  // Real per-room loop, replacing the tripwire above's placeholder now
+  // that issue 9 has authored rooms 1-3 and the finale. Rooms 1, 2 and
+  // the finale are all "no loss possible" shapes (plan.md §9); room 3 is
+  // the one fixture with a real, non-empty fatal predicate list.
+  it("every authored room passes properties 1-4", async () => {
+    const { rooms } = await import("../src/game/rooms/index");
+    const { room3 } = await import("../src/game/rooms/room3");
+    expect(rooms.length).toBeGreaterThan(0);
+
+    for (const room of rooms) {
+      const result = solveRoom(room);
+
+      // Property 1: solvable at all.
+      expect(result.solvable).toBe(true);
+
+      const deadStates = result.reachable.filter((s) => !result.canReachExit(s));
+      const flaggedStates = result.reachable.filter((s) =>
+        room.fatal.some((predicate) => predicate(result.toRoomState(s))),
+      );
+
+      if (room === room3) {
+        // Room 3 is the one room allowed real dead states, and it must
+        // have at least one (the loss condition must actually be
+        // reachable, not merely authored).
+        expect(deadStates.length).toBeGreaterThan(0);
+      } else {
+        // Property 4: rooms 1, 2, and the finale must have NO dead states
+        // at all — not "none we found a predicate for", none, period.
+        expect(deadStates).toEqual([]);
+      }
+
+      // Property 2: every state a fatal predicate flags is genuinely
+      // unreachable-to-exit — an authored "you lose here" never
+      // contradicts a real escape route.
+      for (const s of flaggedStates) {
+        expect(result.canReachExit(s)).toBe(false);
+      }
+
+      // Property 3: every dead state matches some fatal predicate — no
+      // silent dead end the game never tells the player about.
+      for (const s of deadStates) {
+        expect(room.fatal.some((predicate) => predicate(result.toRoomState(s)))).toBe(true);
+      }
+
+      expect(result.stateCount).toBeGreaterThan(10);
     }
-    throw new Error(
-      `spec/solver.test.ts: found room files ${JSON.stringify(files)} but this test was never ` +
-        "updated to import, solve, and check them against properties 1-4 — fix this test, don't skip it. " +
-        "Also see solver.ts's header comment on the jump-mid-path limitation: every G/C/R tile in a real " +
-        "room must be reachable by LANDING on it, not merely by being jumped over.",
-    );
   });
 });
