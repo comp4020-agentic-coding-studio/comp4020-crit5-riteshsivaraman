@@ -42,12 +42,15 @@ import {
 // demoWorld/armed — see rules.ts's header for why that shape (not World,
 // not Level) is what issue #8's solver needs too.
 import { isRoomDead, hasWon, type RoomState, type Status } from "../game/rules";
-import { restart as restartWorld } from "../game/world";
 // Issue #6: rewind machine. Pure module — see notes/agents/log.md [#6] for
 // why it takes structural parameters instead of importing world.ts (which
 // doesn't exist in this demo wiring either; #5/#6 both replace this file's
 // throwaway state once a real World exists).
 import { enterRewindTile, rewind, type ArmedState } from "../game/rewind";
+// Issue #7's reset, extracted from this file's own restartRoom() so its
+// completeness is asserted by spec/room.test.ts, not just read off the
+// function body — see room.ts's header and notes/agents/log.md [#7 #8 #9].
+import { freshRoomState } from "../game/room";
 // Issue #11's browser half of playSfx, imported directly rather than only
 // relying on index.astro's separate <script> tag — see this file's log
 // entry [#10] for why that's safe (ESM module identity is per URL, so the
@@ -312,30 +315,35 @@ function showWinScreen(): void {
 
 /**
  * Rebuilds the room from its ASCII source, per plan.md §6/issue #7's
- * Done-when: `destroyed` empty, `anchor`/`armed` null, player at spawn —
- * all reassigned together, in this one function, so nothing that reads
- * any of them mid-restart can observe a torn state. Also the fix for the
- * Reviewer's confirmed-at-module-level finding: `rewind()` trusts arm-time
- * occupancy only because `destroyed` is monotone within a room, and
- * `restart()` (world.ts) is the one operation that breaks that — reusing
- * a pre-restart anchor after this point would place the body inside
- * geometry restart just re-solidified. Resetting `armed`/`wasOnRewindTile`
- * here, in the same operation that reassigns `demoWorld`, is what keeps
- * that reachable-but-never-armed bug from ever actually firing.
+ * Done-when: `destroyed` empty, `anchor`/`armed` null, player at spawn.
+ * The actual reset — `world`, `sizeState`, `body`, `armed`,
+ * `wasOnRewindTile`, all reassigned together so nothing that reads any of
+ * them mid-restart can observe a torn state — now lives in
+ * `freshRoomState` (src/game/room.ts), extracted so its completeness is
+ * asserted by spec/room.test.ts rather than read off this function body.
+ * This is also the fix for the Reviewer's confirmed-at-module-level
+ * finding: `rewind()` trusts arm-time occupancy only because `destroyed`
+ * is monotone within a room, and `restart()` (world.ts) is the one
+ * operation that breaks that — reusing a pre-restart anchor after this
+ * point would place the body inside geometry restart just
+ * re-solidified. `restartRoom()` itself is now a thin caller: apply
+ * `freshRoomState`'s result, then reset the genuinely-DOM/juice state
+ * (`setMachineArmed`, `debris`/`shakeMs`/`impactMs`, the drawn
+ * `player` rect) that src/game/ doesn't own.
  */
 function restartRoom(): void {
-  demoWorld = restartWorld();
-  sizeState = initialSizeState("small");
-  const spawn = spawnPosition(demoLevel.spawn, "small");
-  playerBody = createBody(spawn.x, spawn.y, HITBOX.small.width, HITBOX.small.height);
-  armed = null;
-  wasOnRewindTile = false;
+  const fresh = freshRoomState(demoLevel, "small");
+  demoWorld = fresh.world;
+  sizeState = fresh.sizeState;
+  playerBody = fresh.body;
+  armed = fresh.armed;
+  wasOnRewindTile = fresh.wasOnRewindTile;
   inputController.setMachineArmed(false);
   debris = [];
   shakeMs = 0;
   impactMs = 0;
-  player.x = spawn.x;
-  player.y = spawn.y;
+  player.x = fresh.body.x;
+  player.y = fresh.body.y;
   player.width = HITBOX.small.width;
   player.height = HITBOX.small.height;
   player.color = PLAYER_COLOR.small;

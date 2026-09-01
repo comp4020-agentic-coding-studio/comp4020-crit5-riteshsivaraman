@@ -849,3 +849,33 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   log entry.
   `pnpm check` green, 205 tests (up from 188 — 17 new: 14 in
   `spec/rules.test.ts`, 3 in `spec/size.test.ts`).
+
+[#7 #8 #9] `restartRoom()`'s state reset (main.ts) was correct but
+  untested — `main.ts` has zero coverage, so a future dropped reassignment
+  (e.g. `armed = null`) would go red nowhere. Extracted the pure part into
+  `freshRoomState` (`src/game/room.ts`): given a `Level` and a `Size`, it
+  returns `{ world, sizeState, body, armed, wasOnRewindTile }` — a fresh
+  `World` (via `world.ts`'s `restart`), spawn-size `sizeState`, a body at
+  spawn, `armed: null`, `wasOnRewindTile: false`. `main.ts`'s
+  `restartRoom()` is now a thin caller: apply this plus the genuinely-DOM
+  bits it still owns (`setMachineArmed(false)`, `debris`/`shakeMs`/
+  `impactMs`, the drawn `player` rect). `spec/room.test.ts` asserts each
+  field of `FreshRoomState` in its own `it()` (not one whole-object
+  equality) specifically so a dropped reassignment fails exactly one test,
+  not zero — verified by deleting `armed: null` from the return object and
+  confirming exactly the two tests that read `fresh.armed` (and nothing
+  else) went red, then restoring it. Also added an end-to-end test in the
+  same file, across the real `world.ts`/`rewind.ts`/`player.ts`/`room.ts`,
+  reproducing the Reviewer's exact scenario: arm an anchor whose footprint
+  overlaps a fragile tile (occupiable only once that tile is broken),
+  restart, and confirm the pre-restart anchor — if it had survived — would
+  land the body back inside the now-re-solidified tile, while the real
+  `freshRoomState` path (armed cleared) triggers no rewind at all.
+  Ownership note for #8: the solver's reachability reasoning can now treat
+  "restart" as calling this one function rather than re-deriving what a
+  complete reset means from main.ts's prose. No genuine bug found during
+  the extraction — behaviour is unchanged from the original
+  `restartRoom()`. Did not touch `resolveFragileContact`, the solver (#8),
+  real rooms (#9), or rewind visuals (#15), per this session's scope.
+  `pnpm check` green, 215 tests (up from 205 — 10 new, all in
+  `spec/room.test.ts`).
