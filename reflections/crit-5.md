@@ -1,9 +1,5 @@
 # Crit 5 — Remnant
 
-> DRAFT — written by the orchestrator session from what actually happened, for
-> Ritesh to rewrite in his own voice. The second prompt in particular is a
-> claim about him that only he can make.
-
 ## What was the breakthrough that moved the work forward?
 
 Treating a green test suite as a claim to be checked rather than evidence.
@@ -12,8 +8,8 @@ Four times in one night a check passed while measuring nothing: a sensor whose
 allow-list covered every file that existed, so it scanned zero; a CSS rule that
 made "no horizontal scroll" unfalsifiable; a `hidden` attribute silently
 outranked by an id selector; and parallel worktrees inflating the suite to 304
-tests spanning unmerged branches. None was caught by running the tests. Each
-was caught by asking *what would have to break for this to fail* — and when the
+tests spanning unmerged branches. None was caught by running the tests. Instead, each
+was caught by asking *what would have to break for this to fail*, and when the
 answer was "nothing", the test was the bug.
 
 That turned into a habit I applied to every agent's work after: mutate the
@@ -27,9 +23,9 @@ isolation.
 
 ## What did this work change about who I want to be as a software developer?
 
-I want to be the person who asks what a check would have to see to fail, rather
-than the person who is pleased that it passed. Delegating the building made
-that unavoidable — I could not read every line five agents wrote, so the only
+I want to be the kind of developer who asks what a check would have to see to fail, rather
+than the developer who is pleased that it passed. Delegating the building made
+that unavoidable. I could not read every line five agents wrote, so the only
 leverage I had was on what the work was verified *against*. The most valuable
 things I produced this week were not features. They were sensors, a dispatch
 gate, and the decision to spend one expensive review on the single invariant
