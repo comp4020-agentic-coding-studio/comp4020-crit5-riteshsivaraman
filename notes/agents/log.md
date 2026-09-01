@@ -44,11 +44,11 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
 - **Architect** [#1 #10] — idea.md says "landscape only" but marking is Chrome at
   1920×1080 **and 390×844 portrait**, both counting fully. Portrait is
   first-class: canvas band at the top, touch pads below.
-- **Architect** [#1 #12] — a fullscreen-canvas rewrite would break three shipped
+- **Architect** [#1 #12 #14] — a fullscreen-canvas rewrite would break three shipped
   invariants. `<h1>` is the title card as real DOM text, `<nav>` stays, and the
   no-instructions rule extends to `README.md` and the meta description —
   enforced by a new sensor in issue 12.
-- **Architect (revision, prompted by Ritesh)** [#2 #9] — first pass said "procedural
+- **Architect (revision, prompted by Ritesh)** [#2 #9 #14] — first pass said "procedural
   canvas drawing", which silently dropped `idea.md` §21–22's actual tileset.
   Corrected: a real 10×10 tile atlas, authored as character-grid literals in
   TS and baked to an offscreen canvas at boot. Under a no-tutorial rule visual
@@ -315,3 +315,14 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   thing (after the zero-file sensor and `overflow-x: hidden`) — and this one was
   introduced by the isolation that made parallelism possible, so it is worth
   re-running `npx vitest list` after any change to how sessions are isolated.
+- **Orchestrator** [#14] — opened issue 14 for `render.ts`. `plan.md` §11 item 2
+  included a "procedural tile renderer"; issue 2's Done-when list did not, so
+  its Builder correctly shipped `tilePixels()` as pure byte data and deferred
+  the bake and blit — and no other issue picked them up. Nothing draws. Kept
+  issue 2 closed-as-written rather than reopening it: its contract was met, and
+  the gap was in decomposition. `tilePixels()` returns flat RGBA per 10x10 tile,
+  so #14 bakes with `putImageData` into a scratch canvas at boot and `drawImage`s
+  per tile; `tileset.ts`/`tiles.ts`/`level.ts` must stay pure, only `render.ts`
+  is allow-listed. Blocks four accumulated human checks (overflow, tile
+  legibility, SFX distinctness, jump feel) — none is discharge-able while the
+  screen is blank, which is why this went before #4.
