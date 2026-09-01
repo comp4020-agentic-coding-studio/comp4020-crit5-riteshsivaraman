@@ -31,6 +31,15 @@ checks it, so the deployed head is the only place a broken one shows up.
 `pnpm check` runs them, and `pnpm check:evidence` is the extra gate before you
 ship. CI runs the same plus links, secrets and the deploy.
 
+`pnpm check:dispatch` is a third gate, and it runs at a different moment: before
+an issue is handed to a Builder, not before a commit or a ship. It asserts the
+handoff rather than the code --- clean tree, `plan.md` tracked, the agent log
+current with the last work commit, issue bodies free of the shell-quoting damage
+that makes a Builder's own instructions unreadable. `pnpm check:dispatch <n>`
+also prints the log entries tagged `[#n]`, which go into that Builder's opening
+prompt. It is deliberately out of `pnpm check`: two of its checks need the
+network, and none of them are facts about the code.
+
 `spec/README.md`, `PROCESS.md` and `reflections/README.md` are in this repo and
 say what they are for.
 
@@ -48,10 +57,16 @@ if a subsystem is eating disproportionate time or spend, cut its scope
 Builder-Tester / Reviewer" with nothing else** --- do this first, in order:
 
 1. Read `plan.md` (module boundaries, tile/entity format, issue list).
-2. Read the tail of `notes/agents/log.md` (decisions, why sensors exist).
+2. Read `notes/agents/log.md` --- the entries tagged `[#<your issue>]` are the
+   ones that constrain you, and your dispatch prompt should already quote them.
+   If it didn't, and no entry is tagged for your issue, say so before building
+   rather than guessing: it usually means the gate was skipped.
 3. Read your assigned issue: `gh issue view <n>`.
-4. Only then start work. Append to `notes/agents/log.md` before you finish
-   --- one line is enough: what you decided and why, not a full narration.
+4. Only then start work. Append to `notes/agents/log.md` **in the same commit as
+   the work**, tagged with every issue your decision constrains --- one line is
+   enough: what you decided and why, not a full narration. Logging afterwards
+   trips `check:dispatch`'s staleness check for the next session, which is the
+   point: work that landed after the log last moved is work nobody recorded.
 
 Role definitions:
 
@@ -80,6 +95,17 @@ Role definitions:
   same session, it doesn't get papered over.
 - **Harness changes** (this file, skills, tests-as-sensors) get batched
   once real invariants exist, not added ad hoc mid-session.
+- **Write issue bodies with `--body-file` or a single-quoted heredoc**, never
+  an inline double-quoted shell string. Backticks inside one come back
+  escaped, and twelve of this crit's thirteen issues shipped that way ---
+  a Builder's primary instruction rendering as ``\`plan.md\```. `check:dispatch`
+  catches it now; the quoting rule stops it happening.
+- **The gate between phases is not a fourth role.** The role that was tried and
+  cut above was a reviewer-per-issue, which pays a full context reload to
+  re-read work someone already understood. `pnpm check:dispatch` loads no
+  context: it reads `git status`, the log, and the issue bodies, and either
+  clears the handoff or refuses it. Coordination that only inspects state is
+  cheap; coordination that re-derives understanding is what the cut was about.
 
 ## This file is yours
 

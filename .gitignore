@@ -21,3 +21,8 @@ mise.local.toml
 # harness is CLAUDE.md (and any AGENTS.md), not this directory.
 .claude/
 .astro/
+
+# Source material for the plan: kept locally, not part of the deliverable.
+# The agent log and PROCESS staging under notes/ stay tracked.
+notes/idea.md
+notes/week-5.pdf

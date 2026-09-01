@@ -9,6 +9,7 @@
     "preview": "astro preview",
     "typecheck": "astro check",
     "check": "pnpm typecheck && pnpm build && vitest run",
+    "check:dispatch": "node scripts/check-dispatch.ts",
     "check:evidence": "node scripts/check-evidence.ts",
     "test": "vitest run"
   },

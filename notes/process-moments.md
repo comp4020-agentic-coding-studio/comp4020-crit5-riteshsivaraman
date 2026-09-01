@@ -52,8 +52,13 @@ reloads context versus coordination that only inspects state --- is the thing
 worth carrying forward, and it belongs in `CLAUDE.md` in the next batched
 harness change rather than as an ad-hoc edit mid-session.
 
-**Citation.** _pending_ --- the two commits below, once made:
-- `<sha-1>` stack: Astro migration
-- `<sha-2>` plan: plan.md, agent log, issue batch
+**Citation.**
+[`7e9927d...c74e54f`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/compare/7e9927d...c74e54f) --- the stack migration
+committed on its own so a Builder's first diff stays legible, then `plan.md`,
+the agent log and the issue batch committed as tracked files a `/clear`-ed
+session can actually read.
+
+- [`7e9927d`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/7e9927d) stack: migrate to Astro, move source under `src/`
+- [`c74e54f`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-riteshsivaraman/commit/c74e54f) plan: crit-5 plan, agent log, issue batch
 
 ---
