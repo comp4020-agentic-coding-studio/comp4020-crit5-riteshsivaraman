@@ -1144,3 +1144,9 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   $109 of $120 spent, resets 3 Sep. The arming SFX and the now-visible
   contextual control are the only feedback the mechanic has. This is a real
   gap in the no-tutorial rule, recorded in PROCESS.md rather than papered over.
+- **Orchestrator** [#9] — moved room 3's growth pad from col 6 to col 7 at
+  Ritesh's request (spacing/readability). Re-verified rather than assumed:
+  solvable true, solvable-without-rewind false, 267 reachable / 50 dead, zero
+  dead with a small anchor — all identical to before. Growth-pad clearance
+  still passes because row 13 cols 7–8 are open; col 8 would have collided
+  with wall A at col 9.

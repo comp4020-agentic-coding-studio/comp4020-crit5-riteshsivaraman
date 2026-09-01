@@ -119,10 +119,10 @@ wrong badly enough to lose.
 
 ```
 #........=........#......#.....#
-#P..R.G..=...........C........E#
+#P..R..G.=...........C........E#
 ################==##############
 ################..##############
-     ^  ^  ^          ^        ^
+     ^   ^ ^          ^        ^
      R  G  wall A     C        E
 ```
 
@@ -137,7 +137,7 @@ the room is provably unsolvable without it.
 
 1. Walk right. **Do not jump.** Stepping onto the machine at column 4 arms it
    while you are small.
-2. Continue onto the growth pad at column 6. You grow.
+2. Continue onto the growth pad at column 7. You grow.
 3. Walk into the cracked wall at column 9. Large, you break it.
 4. You are now stuck: too large for the ceiling ahead, and walking further
    right breaks the floor at columns 16–17 and drops you in a pit.
