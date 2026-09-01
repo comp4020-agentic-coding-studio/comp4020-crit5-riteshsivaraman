@@ -305,3 +305,13 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   physics.test.ts` will still pass after a retune since it asserts
   behaviour (no tunnelling, clean stops, exactly-once landing), not the
   specific numbers.
+- **Orchestrator** [#12] — parallel Builders run in git worktrees under
+  `.claude/worktrees/`, which are real checkouts *inside* the repo, so vitest's
+  default include walked into them: `pnpm check` reported 304 passing tests
+  across three stale copies of every spec, each `pure-modules.test.ts` scanning
+  its own worktree's `src/game`. Green there was not green here. Excluded them
+  in `vitest.config.ts`; the true count after merging issues 2, 3 and 11 is 105.
+  Third instance this crit of a check that passed while measuring the wrong
+  thing (after the zero-file sensor and `overflow-x: hidden`) — and this one was
+  introduced by the isolation that made parallelism possible, so it is worth
+  re-running `npx vitest list` after any change to how sessions are isolated.
