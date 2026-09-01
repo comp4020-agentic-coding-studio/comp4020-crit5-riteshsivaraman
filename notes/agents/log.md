@@ -326,3 +326,43 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   is allow-listed. Blocks four accumulated human checks (overflow, tile
   legibility, SFX distinctness, jump feel) — none is discharge-able while the
   screen is blank, which is why this went before #4.
+
+- **Builder-Tester** [#4 #9 #14] — built `src/game/render.ts` (`bakeAtlas`,
+  `renderLevel`) and `spec/render.test.ts`. `render.ts` bakes every tile kind
+  from `tilePixels()` into one wide atlas canvas at boot via `putImageData` —
+  one call per distinct kind, never again — and `renderLevel` draws one
+  `drawImage` per non-empty tile per frame, reading from that atlas by kind
+  offset, plus one `fillRect` for the player rect on top. Both are typed
+  against a narrow structural `RenderCtx`/`RenderCanvas` (not
+  `CanvasRenderingContext2D`/`HTMLCanvasElement`), which is what lets
+  `spec/render.test.ts` drive the bake and the blit against a plain stub
+  object with `vi.fn()` — no jsdom canvas anywhere in the test. Wired into
+  `src/scripts/main.ts`, replacing the placeholder `fillRect`: real
+  `document.createElement("canvas")` + `new ImageData(...)` are supplied only
+  there, keeping `render.ts` itself DOM-constructor-free at the type level.
+  `renderLevel` also takes a `destroyed: ReadonlySet<string>` and skips
+  blitting a fragile tile once its coordinate is in that set — untested by
+  any other module yet since world.ts (#6) doesn't exist, but #5's
+  destructible-wall Builder can pass its `destroyed` set straight through
+  with no adapter.
+  Since `world.ts`/`rooms/*.ts` (#6/#9) don't exist yet, `main.ts` builds one
+  throwaway demo room inline (not a real room, not reused by anything) sized
+  exactly `ROOM_WIDTH_TILES x ROOM_HEIGHT_TILES` (32x18 = 320x180, the full
+  backbuffer, no camera needed) with every tile kind placed at least once —
+  border walls in both solid kinds, a floor with two fragile gaps next to
+  solid tiles for contrast, one of each mechanic tile, one decor tile — so a
+  human pass can judge tile legibility per the issue's Done-when bullet 5.
+  **#9's room author should not reuse this layout or its coordinates** —
+  it exists only to make something visible, not to model what a real room
+  looks like. The player rect is static (no input, no physics step wired) at
+  a hardcoded 8x16 placeholder size — **#4's size-system Builder should not
+  treat that as load-bearing**; it was picked only so something recognisable
+  as a player draws, not as a proposal for actual player dimensions.
+  `tileset.ts`/`tiles.ts`/`level.ts` stayed untouched; `spec/pure-modules.
+  test.ts` still passes (`render.ts` is on its allow-list already).
+  Real-browser check unverified: `list_connected_browsers` returned `[]`
+  again this session — Ritesh's next real-browser pass should load the page
+  at 1920x1080 and 390x844 and confirm the level is visible, tiles read as
+  distinct terrain, and the console is clean, per the issue's Done-when
+  bullet 5.
+  `pnpm check` green, 111 tests (up from 105 — 6 new in `spec/render.test.ts`).

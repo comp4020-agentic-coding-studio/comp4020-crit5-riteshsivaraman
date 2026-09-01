@@ -4,6 +4,15 @@
 // and window events, and owns nothing that needs to be unit-testable.
 import { createLoop, type Loop } from "../game/loop";
 import { layout, INTERNAL_WIDTH, INTERNAL_HEIGHT, type Layout } from "../game/layout";
+import { parseLevel } from "../game/level";
+import { TILE, ROOM_WIDTH_TILES, ROOM_HEIGHT_TILES } from "../game/tiles";
+import {
+  bakeAtlas,
+  renderLevel,
+  type RenderCanvas,
+  type RenderCtx,
+  type PlayerRect,
+} from "../game/render";
 
 function required<T>(el: T | null, what: string): T {
   if (!el) throw new Error(`main.ts: expected ${what} in the page`);
@@ -64,17 +73,78 @@ function resize(): void {
 window.addEventListener("resize", resize);
 resize();
 
-// Placeholder render: render.ts (issue 2) owns the real tile atlas and the
-// game's visuals. This just proves the canvas is live and the fixed step
-// is actually running, without drawing anything that looks like a finished
-// scene yet.
+// Issue 14: bake the tileset atlas once at boot (never per frame — see
+// render.ts's bakeAtlas docs) using the real DOM canvas + ImageData ctors.
+function createCanvas(width: number, height: number): RenderCanvas {
+  const el = document.createElement("canvas");
+  el.width = width;
+  el.height = height;
+  return el as unknown as RenderCanvas;
+}
+
+const atlas = bakeAtlas(
+  createCanvas,
+  (data, width, height) => new ImageData(data as unknown as Uint8ClampedArray<ArrayBuffer>, width, height),
+);
+
+// Demo room: world.ts/rooms/*.ts (issues #6/#9) don't exist yet, so this is
+// a throwaway fixture built here in the bootstrap file, not a real room —
+// its only job is to put every tile kind on screen at once so a human can
+// judge legibility (issue 14's Done-when bullet 5) and to unblock the four
+// human checks issue 14 exists to unblock (notes/agents/log.md [#14]).
+// Exactly ROOM_WIDTH_TILES x ROOM_HEIGHT_TILES so it fills the 320x180
+// backbuffer with no camera/scroll needed.
+function buildDemoRows(): string[] {
+  const rows: string[][] = Array.from({ length: ROOM_HEIGHT_TILES }, () =>
+    Array.from({ length: ROOM_WIDTH_TILES }, () => "."),
+  );
+  const last = ROOM_HEIGHT_TILES - 1;
+  const right = ROOM_WIDTH_TILES - 1;
+
+  for (let x = 0; x < ROOM_WIDTH_TILES; x++) {
+    rows[0][x] = "%";
+    rows[last][x] = "%";
+  }
+  for (let y = 0; y < ROOM_HEIGHT_TILES; y++) {
+    rows[y][0] = "#";
+    rows[y][right] = "#";
+  }
+
+  // A floor to stand on, one row up from the bottom border, with a couple
+  // of fragile gaps so "=" reads next to solid "#" for comparison.
+  const floorY = last - 2;
+  for (let x = 1; x < right; x++) {
+    rows[floorY][x] = x === 10 || x === 11 ? "=" : "#";
+  }
+
+  rows[floorY - 1][6] = "G"; // growth pad
+  rows[floorY - 1][15] = "C"; // coolant
+  rows[floorY - 1][24] = "R"; // rewind machine
+  rows[floorY - 3][20] = ":"; // decor pipe, non-colliding
+
+  rows[floorY - 1][2] = "P"; // spawn
+  rows[floorY - 1][right - 2] = "E"; // exit
+
+  return rows.map((row) => row.join(""));
+}
+
+const demoLevel = parseLevel(buildDemoRows());
+const demoDestroyed = new Set<string>();
+const player: PlayerRect = {
+  x: demoLevel.spawn.x * TILE,
+  y: demoLevel.spawn.y * TILE - (16 - TILE),
+  width: 8,
+  height: 16,
+};
+
+// Rules/physics/world land in later issues; nothing to simulate yet, so the
+// step function stays empty and the player rect above is static.
 function step(_fixedDeltaMs: number): void {
-  // Rules/physics/world land in later issues; nothing to simulate yet.
+  // Nothing to simulate yet — see the comment above.
 }
 
 function render(): void {
-  ctx.fillStyle = "#101014";
-  ctx.fillRect(0, 0, INTERNAL_WIDTH, INTERNAL_HEIGHT);
+  renderLevel(ctx as unknown as RenderCtx, atlas, demoLevel, demoDestroyed, player);
 }
 
 const loop: Loop = createLoop(step);
