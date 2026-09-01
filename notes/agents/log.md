@@ -159,3 +159,52 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   chrome with default blue links above a black canvas, and an h1 band
   identical in colour to the canvas, both read as an unfinished template —
   cosmetic only, no game rules touched.
+- **Builder-Tester** [#3 #8] — built `src/game/physics.ts` (`stepBody(body,
+  input, level, destroyed, dtMs) -> Body`, pure) and `spec/physics.test.ts`.
+  Deliberately did **not** import `level.ts`'s eventual `Level` type (that
+  module isn't built yet and isn't this issue's job to invent): physics
+  defines its own minimal `PhysicsLevel` (`tileSize`, `widthPx`, `heightPx`,
+  `isSolidTile(x,y)`) and a `Destroyed = ReadonlySet<string>` keyed `"x,y"`,
+  matching plan.md §6's `world.ts` shape exactly so a reducer's `destroyed`
+  set can be passed straight through. `level.ts` (issue 9, or whichever
+  issue builds it) should construct a `PhysicsLevel` from its ASCII grid
+  rather than physics reaching into ASCII parsing itself.
+  Collision is a tile-scan sweep (checks every row/column crossed between
+  old and new position, snaps exactly to the tile boundary), not a
+  fixed-substep loop — this rules out tunnelling at *any* speed or dt, not
+  just at the tuned `MAX_FALL_SPEED`, and gives exact, jitter-free
+  wall/floor snapping for free. Grounded is re-detected every frame from
+  gravity's own tiny downward push while resting (no separate ground probe
+  needed) — that's what makes ground detection "stable" without extra state.
+  **Issue 8 should import** `simulateJumpArc(tileSize, stepMs?)` from
+  `physics.ts`: it replays the exact same fixed-step vertical integration
+  `stepBody` uses (same `GRAVITY`, `JUMP_SPEED`, `MAX_FALL_SPEED`,
+  `DEFAULT_STEP_MS`) with no horizontal collision, and returns
+  `{maxHeightTiles, horizontalRangeAtSameHeightTiles, ...}` already floored
+  to whole tiles — conservative numbers for "can this gap/ledge be
+  reached," derived from the real discretised engine rather than a
+  continuous-physics formula that could disagree with it at the margins.
+  Also export the constants directly (`MAX_RUN_SPEED`, `GRAVITY`,
+  `JUMP_SPEED`, `MAX_FALL_SPEED`) if the solver needs anything
+  `simulateJumpArc` doesn't already give it — do not hand-copy the numbers.
+  `physics.ts` cannot import `loop.ts` (plan.md §5's dependency rule is
+  one-directional), so `DEFAULT_STEP_MS` is a deliberately duplicated
+  `1000/60` literal; `spec/physics.test.ts` asserts it stays equal to
+  `loop.ts`'s `STEP_MS` so the duplication can't silently drift unnoticed.
+  `spec/pure-modules.test.ts` caught a real near-miss: a JSDoc comment
+  said "grace window," and the sensor only strips `//` line comments, not
+  `/** */` blocks, so it flagged `physics.ts` as touching `window` — a
+  false positive on the *word*, not the API, but it's exactly the kind of
+  match the sensor is cheap on purpose about. Confirmed red for that reason
+  (`physics.ts matched a browser API pattern`), then reworded the comments
+  rather than touching the sensor.
+  Constants (`MAX_RUN_SPEED=70`, `GRAVITY=700`, `JUMP_SPEED=220`,
+  `COYOTE_TIME_MS=100`, `JUMP_BUFFER_MS=120`, ...) are a first pass tuned
+  by arithmetic only — no browser was connected this session
+  (`list_connected_browsers` returned `[]`), so the issue's "drive the real
+  game and confirm the jump feels fair" half is still open. Next session
+  with a working browser connection should play room 1+ once it exists and
+  retune `JUMP_SPEED`/`GRAVITY`/`MAX_RUN_SPEED` by feel if needed — `spec/
+  physics.test.ts` will still pass after a retune since it asserts
+  behaviour (no tunnelling, clean stops, exactly-once landing), not the
+  specific numbers.
