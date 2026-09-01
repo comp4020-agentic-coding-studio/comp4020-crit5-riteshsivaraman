@@ -28,6 +28,11 @@ import {
   transitionScale,
   type PlayerSizeState,
 } from "../game/player";
+// Issue #6: rewind machine. Pure module — see notes/agents/log.md [#6] for
+// why it takes structural parameters instead of importing world.ts (which
+// doesn't exist in this demo wiring either; #5/#6 both replace this file's
+// throwaway state once a real World exists).
+import { arm, rewind, type Anchor } from "../game/rewind";
 // Issue #11's browser half of playSfx, imported directly rather than only
 // relying on index.astro's separate <script> tag — see this file's log
 // entry [#10] for why that's safe (ESM module identity is per URL, so the
@@ -182,6 +187,34 @@ function togglePause(): void {
   paused = !paused;
 }
 
+// Issue #6: no anchor stored yet. `arm()` refuses to store one that
+// doesn't fit — see src/game/rewind.ts — so `null` here always means
+// "no machine armed", never "armed somewhere invalid".
+let anchor: Anchor | null = null;
+let wasOnRewindTile = false;
+
+// Runs the player back to `anchor`, per plan.md's brief ("re-entering it,
+// or the contextual rewind control, returns the player to that anchor").
+// `rewind()` itself never touches `demoDestroyed` — see rewind.ts's file
+// header for why that's structural, not just "it doesn't currently do
+// it". A no-op (no anchor armed) is silently ignored, same convention as
+// every other no-op in this file (requestSizeChange, etc).
+function triggerRewind(): void {
+  const result = rewind({
+    x: playerBody.x,
+    y: playerBody.y,
+    size: sizeState.size,
+    anchor,
+    destroyed: demoDestroyed,
+  });
+  if (!result.triggered) return;
+  const box = HITBOX[result.size];
+  playerBody = { ...playerBody, x: result.x, y: result.y, width: box.width, height: box.height };
+  sizeState = { size: result.size, transition: null };
+  player.color = PLAYER_COLOR[result.size];
+  playSfx("rewind");
+}
+
 // Issue #10: unified keyboard + touch input. Neither physics.ts nor this
 // step function below can tell A/Left from a finger on #pad-left — both
 // arrive already OR'd into the same InputState (src/game/input.ts).
@@ -190,6 +223,10 @@ const inputController = createInputController({
   controlsContainer: controls,
   document,
   onPauseRequest: togglePause,
+  // Issue #10 built the contextual control gated on setMachineArmed;
+  // issue #6 (this file's change) is the first caller with something
+  // real for it to do.
+  onRewindRequest: triggerRewind,
 });
 
 function step(fixedDeltaMs: number): void {
@@ -238,6 +275,31 @@ function step(fixedDeltaMs: number): void {
     }
   }
   sizeState = advanceSizeTransition(sizeState, fixedDeltaMs);
+
+  // Issue #6: walking into an 'R' machine arms it; re-entering it (having
+  // left and come back) rewinds instead. Edge-triggered on the feet tile
+  // (entered this frame, wasn't on it last frame) so standing on the tile
+  // doesn't re-fire every frame — same shape as the jump/land edge
+  // detection above. `arm()` is the safe-growth-style no-op: a cell the
+  // current hitbox doesn't fit in leaves any existing anchor untouched.
+  const onRewindTile = feetChar === "R";
+  if (onRewindTile && !wasOnRewindTile) {
+    const alreadyArmedHere =
+      anchor !== null &&
+      anchor.x === playerBody.x &&
+      anchor.y === playerBody.y &&
+      anchor.size === sizeState.size;
+    if (alreadyArmedHere) {
+      triggerRewind();
+    } else {
+      const armed = arm(playerBody.x, playerBody.y, sizeState.size, physicsLevel, demoDestroyed);
+      if (armed) {
+        anchor = armed;
+        inputController.setMachineArmed(true);
+      }
+    }
+  }
+  wasOnRewindTile = onRewindTile;
 
   // Squash/stretch is drawn-only (plan.md §8): the hitbox above already
   // swapped instantly, so collision never reasons about an in-between

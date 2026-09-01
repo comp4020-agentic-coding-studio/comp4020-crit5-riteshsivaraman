@@ -544,3 +544,59 @@ role without other context (see CLAUDE.md, "Multi-model workflow").
   `spec/pure-modules.test.ts` since it dynamically adds one "does not
   reference a browser API" check per file under `src/game/` and now
   finds `player.ts` too).
+- **Builder-Tester** [#6 #5 #8] — built `src/game/rewind.ts`, the rewind
+  machine (plan.md's "central invariant"). Ran in parallel with #5
+  (destructible walls) in an isolated worktree, so `src/game/world.ts`
+  wasn't visible — per this issue's dispatch brief, `rewind.ts` does not
+  import `world.ts` (mirrors `physics.ts`'s `PhysicsLevel`/`render.ts`'s
+  `RenderCtx` pattern: it takes the structural shape it needs as
+  parameters). Two exports: `arm(x, y, size, level, destroyed): Anchor |
+  null` (refuses via `canOccupy` — issue #4's standalone predicate, not
+  reimplemented — when the body wouldn't fit; per plan.md §10) and
+  `rewind<D>(input: RewindInput<D>): RewindOutput<D>`.
+  **The structural guarantee for #8's solver and the one-shot Reviewer
+  pass**: `rewind`'s `destroyed` parameter is typed as an unconstrained
+  generic `D`, not `Destroyed`. The function body has no way to call
+  `.add`/`.delete`/`.clear` on it — TypeScript doesn't know `D` has those
+  methods, so attempting to would fail `pnpm typecheck`. It's not "this
+  function currently doesn't touch destroyed", it's "this function cannot
+  reach code that would" — the difference the dispatch brief asked for.
+  `rewind()` only ever echoes `input.destroyed` back by reference in
+  `RewindOutput.destroyed`, so a future `world.ts` reducer can spread the
+  result over its own state without separately re-attaching `destroyed`.
+  `spec/rules.test.ts` (the focused test the issue's brief names
+  explicitly) simulates world.ts by hand — a plain mutable `Set<string>`,
+  mutated directly to stand in for `breakTile` — since the real module
+  isn't importable from this worktree; **a post-merge integration check
+  against the real `world.ts` is still owed** (flagging for whoever lands
+  #5/merges both branches). Covers: destroy-then-rewind (wall stays
+  destroyed, player restored to anchor position+size, `destroyed` is the
+  same reference *and* same contents, not just deep-equal); a
+  non-Set-shaped `destroyed` round-trips untouched (demonstrates the
+  generic can't be narrowed at runtime either); `arm()` refuses a
+  non-fitting cell (reused #4's exact "1-tile gap" fixture shape so the
+  refusal is provably the same predicate, not a lookalike); a broken
+  fragile tile no longer blocks re-arming; rewind with no anchor is a
+  no-op that passes `x`/`y`/`size`/`destroyed` straight through.
+  Confirmed red-first: temporarily stubbed `arm()` to skip the
+  `canOccupy` call entirely, watched exactly the two "refuses" tests fail
+  (not the whole suite) with the actual return value in the diff, then
+  restored.
+  Wired minimally into `main.ts` (additive): walking onto the demo room's
+  `R` tile calls `arm()`; re-entering the same cell (edge-triggered on the
+  feet tile, so standing on it doesn't refire every frame) or the
+  contextual rewind control (`onRewindRequest`, built by #10 with nothing
+  to call until now) calls `rewind()` and plays `playSfx("rewind")` on
+  `triggered`. No visual desaturate/ghost-afterimage/reversed-sweep effect
+  was built — plan.md's brief describes one but issue #6's own Done-when
+  list only requires the rules-level behaviour above, and no browser was
+  available this session to tune a ~0.5-1s effect blind. Flagging that as
+  owed polish for whoever next has a browser connected, alongside #10's
+  and #4's still-open human-verification items.
+  **Unverified**: `list_connected_browsers` returned `[]` again this
+  session — the arm/rewind flow in the demo room, the contextual control's
+  reveal-on-arm, and the (absent) visual effect are all untested by a
+  human.
+  `pnpm check` green, 162 tests (up from 152 — 9 new in
+  `spec/rules.test.ts`; the +1 beyond that from `spec/pure-modules.test.ts`
+  now scanning `rewind.ts` too and finding it clean).
